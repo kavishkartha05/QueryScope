@@ -1,7 +1,6 @@
 import uuid
 from typing import Annotated
 
-import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +14,7 @@ from app.schemas.run import (
     RunCreatedResponse,
     RunResponse,
 )
+from app.services.aggregator import compute_metrics
 from app.services.runner import run_benchmark
 
 router = APIRouter(prefix="/benchmark", tags=["runs"])
@@ -55,19 +55,17 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             )
 
             latencies = result["latencies"]
-            arr = np.array(latencies, dtype=float)
+            agg = compute_metrics(
+                latencies=latencies,
+                total_time=result["total_time"],
+                num_requests=req.num_requests,
+                error_count=result["error_count"],
+            )
 
             metrics = Metrics(
                 run_id=run_id,
                 latencies=latencies,
-                # numpy percentile gives more accurate results than a sorted
-                # index approximation, consistent with how the frontend will
-                # display tail latency.
-                p50=float(np.percentile(arr, 50)),
-                p95=float(np.percentile(arr, 95)),
-                p99=float(np.percentile(arr, 99)),
-                throughput=req.num_requests / result["total_time"],
-                error_rate=result["error_count"] / req.num_requests,
+                **agg,
             )
             session.add(metrics)
 
