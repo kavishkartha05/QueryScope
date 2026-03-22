@@ -10,6 +10,8 @@ from app.core.db import get_db
 from app.models.run import Metrics, Run, RunStatus
 from app.schemas.run import (
     BenchmarkRequest,
+    DiagnoseRequest,
+    DiagnoseResponse,
     MetricsDetail,
     PaginatedRuns,
     RunCreatedResponse,
@@ -194,6 +196,20 @@ async def get_run_metrics(run_id: uuid.UUID, db: DB) -> MetricsDetail:
             detail="Metrics not found — run may still be in progress",
         )
     return MetricsDetail.model_validate(metrics)
+
+
+# ---------------------------------------------------------------------------
+# POST /diagnose
+# ---------------------------------------------------------------------------
+
+@router.post("/diagnose", response_model=DiagnoseResponse)
+async def diagnose_run(req: DiagnoseRequest) -> DiagnoseResponse:
+    # Local import keeps rca.py's heavy LangChain/LlamaIndex imports from
+    # loading at startup — they're only needed when this endpoint is hit.
+    from app.services.rca import diagnose
+
+    result = await diagnose(req.question)
+    return DiagnoseResponse(diagnosis=result)
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,14 @@ class BenchmarkRequest(BaseModel):
     body: dict | None = None
 
 
+class DiagnoseRequest(BaseModel):
+    question: str
+
+
+class DiagnoseResponse(BaseModel):
+    diagnosis: str
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
