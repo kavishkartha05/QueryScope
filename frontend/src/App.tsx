@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import client from "./api/client";
 import BenchmarkForm from "./components/BenchmarkForm";
+import DiagnosePanel from "./components/DiagnosePanel";
 import LatencyChart from "./components/LatencyChart";
 import RunsTable from "./components/RunsTable";
 import type { PaginatedRuns, Run } from "./types/run";
@@ -55,6 +56,9 @@ export default function App() {
         <section>
           <h2>Latency Chart</h2>
           <LatencyChart runs={runs} />
+        </section>
+        <section>
+          <DiagnosePanel />
         </section>
       </main>
     </div>

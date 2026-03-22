@@ -44,3 +44,7 @@ export interface BenchmarkRequest {
 export interface RunCreatedResponse {
   run_id: string;
 }
+
+export interface DiagnoseResponse {
+  diagnosis: string;
+}
