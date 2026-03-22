@@ -1,15 +1,38 @@
-import { useRef } from "react";
+import { useEffect, useState } from "react";
+import client from "./api/client";
 import BenchmarkForm from "./components/BenchmarkForm";
+import LatencyChart from "./components/LatencyChart";
 import RunsTable from "./components/RunsTable";
+import type { PaginatedRuns, Run } from "./types/run";
 
 export default function App() {
-  // tableKey forces RunsTable to remount (and immediately re-fetch) when a
-  // new run is submitted, so the new "pending" row appears without waiting
-  // for the next 3-second poll interval.
-  const tableKey = useRef(0);
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [total, setTotal] = useState(0);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  async function fetchRuns() {
+    try {
+      const res = await client.get<PaginatedRuns>("/benchmark/runs");
+      setRuns(res.data.items);
+      setTotal(res.data.total);
+      setFetchError(null);
+    } catch (err: unknown) {
+      setFetchError(err instanceof Error ? err.message : "Failed to fetch runs");
+    }
+  }
+
+  useEffect(() => {
+    void fetchRuns();
+    // Polling lives here so RunsTable and LatencyChart share one fetch cycle
+    // rather than each component making independent requests.
+    const id = setInterval(() => void fetchRuns(), 3000);
+    return () => clearInterval(id);
+  }, []);
 
   function handleRunCreated(_runId: string) {
-    tableKey.current += 1;
+    // Fetch immediately so the new "pending" row appears without waiting for
+    // the next poll tick.
+    void fetchRuns();
   }
 
   return (
@@ -27,8 +50,12 @@ export default function App() {
       <aside>
         <BenchmarkForm onRunCreated={handleRunCreated} />
       </aside>
-      <main>
-        <RunsTable key={tableKey.current} />
+      <main style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        <RunsTable runs={runs} total={total} error={fetchError} />
+        <section>
+          <h2>Latency Chart</h2>
+          <LatencyChart runs={runs} />
+        </section>
       </main>
     </div>
   );

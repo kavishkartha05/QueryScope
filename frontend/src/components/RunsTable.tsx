@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react";
-import client from "../api/client";
-import type { PaginatedRuns, Run, RunStatus } from "../types/run";
+import type { Run, RunStatus } from "../types/run";
 
 const STATUS_COLOR: Record<RunStatus, string> = {
   pending: "#888",
@@ -18,31 +16,13 @@ function truncateId(id: string): string {
   return id.slice(0, 8) + "…";
 }
 
-export default function RunsTable() {
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [total, setTotal] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+interface RunsTableProps {
+  runs: Run[];
+  total: number;
+  error: string | null;
+}
 
-  async function fetchRuns() {
-    try {
-      const res = await client.get<PaginatedRuns>("/benchmark/runs");
-      setRuns(res.data.items);
-      setTotal(res.data.total);
-      setError(null);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to fetch runs");
-    }
-  }
-
-  useEffect(() => {
-    void fetchRuns();
-
-    // Poll every 3 s so in-progress runs update without a manual refresh.
-    // Interval is cleared on unmount to avoid state updates on dead components.
-    const id = setInterval(() => void fetchRuns(), 3000);
-    return () => clearInterval(id);
-  }, []);
-
+export default function RunsTable({ runs, total, error }: RunsTableProps) {
   return (
     <div>
       <h2>Runs ({total})</h2>
