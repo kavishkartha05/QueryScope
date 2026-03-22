@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     app_name: str = "QueryScope"
     debug: bool = False
 
+    # Azure AI Search
+    azure_search_endpoint: str = ""
+    azure_search_key: str = ""
+    azure_search_index: str = "benchmark-runs"
+
+    # OpenAI
+    openai_api_key: str = ""
+
 
 # Single instance imported everywhere
 settings = Settings()

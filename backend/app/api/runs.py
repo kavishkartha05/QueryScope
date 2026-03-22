@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -15,7 +16,10 @@ from app.schemas.run import (
     RunResponse,
 )
 from app.services.aggregator import compute_metrics
+from app.services.indexer import index_run
 from app.services.runner import run_benchmark
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/benchmark", tags=["runs"])
 
@@ -34,6 +38,8 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
     Opens its own DB session because the request-scoped session passed to the
     route handler is already closed by the time this runs.
     """
+    logger.info("Background task started for run %s", run_id)
+
     from app.core.db import AsyncSessionLocal  # local import avoids circular at module load
 
     async with AsyncSessionLocal() as session:
@@ -72,11 +78,34 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             run.status = RunStatus.done
             await session.commit()
 
-        except Exception:
-            # Mark failed so the client isn't left polling a "running" run.
+            logger.info("Run %s completed, status=done", run_id)
+
+            # Indexing is best-effort: a transient Azure Search or OpenAI error
+            # must not roll back a completed benchmark or change its status.
+            # The run result is already durable in Postgres; the search index
+            # can be backfilled later if needed.
+            logger.info("About to index run %s", run_id)
+            try:
+                await index_run(
+                    run_id=str(run.id),
+                    target_url=run.target_url,
+                    method=run.method,
+                    num_requests=run.num_requests,
+                    p50=metrics.p50,
+                    p95=metrics.p95,
+                    p99=metrics.p99,
+                    throughput=metrics.throughput,
+                    error_rate=metrics.error_rate,
+                    created_at=run.created_at,
+                )
+            except Exception as exc:
+                logger.warning("Indexing failed for run %s: %s", run.id, exc)
+            logger.info("Indexing block completed for run %s", run_id)
+
+        except Exception as bg_exc:
+            logger.exception("Background task failed for run %s: %s", run_id, bg_exc)
             run.status = RunStatus.failed
             await session.commit()
-            raise
 
 
 # ---------------------------------------------------------------------------

@@ -64,3 +64,6 @@ cd frontend && npm run dev
 - Do not use synchronous SQLAlchemy — always async
 - Do not store aggregated metrics only — keep raw per-request latencies
 - Do not add Redis or a task queue in Week 1 — keep it simple
+
+## Week 4 TODO
+- Scrub git history of leaked Azure key using git filter-repo before making repo public

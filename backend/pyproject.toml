@@ -16,6 +16,10 @@ asyncpg = "^0.29.0"
 alembic = "^1.13.1"
 greenlet = "^3.3.2"
 numpy = "^2.4.3"
+llama-index-core = "^0.14.18"
+llama-index-embeddings-openai = "^0.6.0"
+llama-index-vector-stores-azureaisearch = "^0.5.0"
+azure-search-documents = "^11.6.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1.1"
