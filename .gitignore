@@ -26,3 +26,4 @@ Thumbs.db
 # Node (for MCP server)
 node_modules/
 .npm/
+CLAUDE.md
