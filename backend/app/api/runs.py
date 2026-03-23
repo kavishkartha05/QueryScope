@@ -12,6 +12,7 @@ from app.schemas.run import (
     BenchmarkRequest,
     DiagnoseRequest,
     DiagnoseResponse,
+    LLMBenchmarkRequest,
     MetricsDetail,
     PaginatedRuns,
     RunCreatedResponse,
@@ -19,7 +20,7 @@ from app.schemas.run import (
 )
 from app.services.aggregator import compute_metrics
 from app.services.indexer import index_run
-from app.services.runner import run_benchmark
+from app.services.runner import run_benchmark, run_llm_benchmark
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,70 @@ async def get_run_metrics(run_id: uuid.UUID, db: DB) -> MetricsDetail:
             detail="Metrics not found — run may still be in progress",
         )
     return MetricsDetail.model_validate(metrics)
+
+
+# ---------------------------------------------------------------------------
+# POST /benchmark/llm
+# ---------------------------------------------------------------------------
+
+async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
+    """
+    Background task for LLM benchmarking. Results are logged rather than
+    persisted to the Metrics table — LLM metrics (TTFT, tokens/sec) have a
+    different shape from REST latencies and don't fit the existing schema.
+    Persistence can be added in a follow-up once the schema is extended.
+    """
+    import numpy as np
+
+    logger.info("LLM benchmark task started for run_id=%s", run_id)
+    try:
+        result = await run_llm_benchmark(
+            endpoint_url=str(req.endpoint_url),
+            api_key=req.api_key,
+            model=req.model,
+            prompt=req.prompt,
+            num_requests=req.num_requests,
+            concurrency=req.concurrency,
+        )
+
+        ttft = np.array(result["ttft_latencies"], dtype=float)
+        total = np.array(result["total_latencies"], dtype=float)
+        tps_list = result["tokens_per_second_list"]
+
+        avg_tps = float(np.mean(tps_list)) if tps_list else 0.0
+
+        logger.info(
+            "LLM benchmark run_id=%s complete | "
+            "TTFT p50=%.1fms p95=%.1fms p99=%.1fms | "
+            "total_time p50=%.1fms p95=%.1fms p99=%.1fms | "
+            "avg_tokens_per_sec=%.2f | errors=%d",
+            run_id,
+            float(np.percentile(ttft, 50)),
+            float(np.percentile(ttft, 95)),
+            float(np.percentile(ttft, 99)),
+            float(np.percentile(total, 50)),
+            float(np.percentile(total, 95)),
+            float(np.percentile(total, 99)),
+            avg_tps,
+            result["error_count"],
+        )
+    except Exception as exc:
+        logger.exception("LLM benchmark task failed for run_id=%s: %s", run_id, exc)
+
+
+@router.post("/llm", response_model=RunCreatedResponse, status_code=202)
+async def create_llm_benchmark(
+    req: LLMBenchmarkRequest,
+    background_tasks: BackgroundTasks,
+) -> RunCreatedResponse:
+    # Generate a client-visible run_id without a DB row — LLM runs aren't
+    # persisted to the runs table yet. The id still lets callers correlate
+    # log lines with the request that triggered them.
+    import uuid as _uuid
+
+    run_id = str(_uuid.uuid4())
+    background_tasks.add_task(_execute_llm_benchmark, run_id, req)
+    return RunCreatedResponse(run_id=_uuid.UUID(run_id))
 
 
 # ---------------------------------------------------------------------------

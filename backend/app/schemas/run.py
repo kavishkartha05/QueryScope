@@ -19,6 +19,16 @@ class BenchmarkRequest(BaseModel):
     body: dict | None = None
 
 
+class LLMBenchmarkRequest(BaseModel):
+    endpoint_url: HttpUrl
+    # api_key is kept out of logs; callers must pass it per-request.
+    api_key: str
+    model: str
+    prompt: str
+    num_requests: int = Field(default=10, ge=1, le=1_000)
+    concurrency: int = Field(default=3, ge=1, le=50)
+
+
 class DiagnoseRequest(BaseModel):
     question: str
 
