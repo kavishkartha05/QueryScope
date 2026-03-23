@@ -1,0 +1,19 @@
+{
+  "name": "queryscope-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing QueryScope benchmark tools to AI assistants",
+  "private": true,
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "axios": "^1.7.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
