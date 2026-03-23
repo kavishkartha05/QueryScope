@@ -6,6 +6,11 @@
 
 ---
 
+## Video Demo
+https://www.loom.com/share/aa0458b3b73849f4b8c731217b443b6f
+
+---
+
 ## Demo
 
 Point QueryScope at any endpoint, run a configurable benchmark, and ask questions in natural language:
