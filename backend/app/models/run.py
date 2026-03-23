@@ -2,6 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlalchemy import (
     DateTime,
     Enum,
@@ -11,7 +12,6 @@ from sqlalchemy import (
     String,
     Uuid,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -77,10 +77,12 @@ class Metrics(Base):
         index=True,
     )
 
-    # Native Postgres ARRAY avoids a separate latency_samples join table and
-    # lets us pass the raw array directly to numpy for percentile computation.
+    # JSON is used instead of PostgreSQL's native ARRAY so the schema works on
+    # both Postgres and MySQL (adapter swap demo — see docs/mysql-adapter.md).
+    # SQLAlchemy serialises list[float] to/from JSON automatically; numpy can
+    # still operate on the deserialized Python list directly.
     latencies: Mapped[list[float]] = mapped_column(
-        ARRAY(Float), nullable=False, default=list
+        sa.JSON, nullable=False, default=list
     )
 
     # Pre-computed percentiles stored alongside raw latencies so dashboards

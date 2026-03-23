@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "0001"
 down_revision: Union[str, None] = None
@@ -38,7 +37,8 @@ def upgrade() -> None:
         "metrics",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("run_id", sa.Uuid(), nullable=False),
-        sa.Column("latencies", postgresql.ARRAY(sa.Float()), nullable=False),
+        # sa.JSON works on both PostgreSQL and MySQL (cross-DB adapter swap demo).
+        sa.Column("latencies", sa.JSON(), nullable=False),
         sa.Column("p50", sa.Float(), nullable=False),
         sa.Column("p95", sa.Float(), nullable=False),
         sa.Column("p99", sa.Float(), nullable=False),

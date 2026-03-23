@@ -13,6 +13,7 @@ uvicorn = { extras = ["standard"], version = "^0.29.0" }
 pydantic-settings = "^2.2.1"
 sqlalchemy = { extras = ["asyncio"], version = "^2.0.29" }
 asyncpg = "^0.29.0"
+aiomysql = "^0.2.0"
 alembic = "^1.13.1"
 greenlet = "^3.3.2"
 numpy = "^2.4.3"
