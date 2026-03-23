@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: queryscope
+      POSTGRES_USER: queryscope
+      POSTGRES_PASSWORD: queryscope
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready exits 0 only when Postgres is accepting connections.
+      # The backend's depends_on waits for this before starting.
+      test: ["CMD-SHELL", "pg_isready -U queryscope -d queryscope"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        # condition: service_healthy waits for the health check above, not
+        # just container start — Postgres takes a moment to be ready to accept
+        # connections after the process starts.
+        condition: service_healthy
+    env_file:
+      # Load .env for secrets (AZURE_SEARCH_KEY, OPENAI_API_KEY, etc.).
+      # The DATABASE_URL override below takes precedence over any value in .env
+      # because environment: entries win over env_file entries in Compose.
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://queryscope:queryscope@postgres:5432/queryscope
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      # Vite preview runs on 4173 internally; map to 5173 so the URL matches
+      # the CORS origin configured in the FastAPI app (http://localhost:5173).
+      - "5173:4173"
+    depends_on:
+      - backend
+
+volumes:
+  # Named volume so Postgres data survives `docker compose down`.
+  # Use `docker compose down -v` to wipe the volume intentionally.
+  postgres_data:

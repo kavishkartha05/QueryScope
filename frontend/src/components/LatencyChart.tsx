@@ -53,10 +53,7 @@ export default function LatencyChart({ runs }: LatencyChartProps) {
           // Start at 0 so bars are visually comparable across runs.
           domain={[0, "auto"]}
         />
-        <Tooltip
-          formatter={(value: number, name: string) => [`${value.toFixed(2)} ms`, name]}
-          labelFormatter={(label: string) => `Run ${label}`}
-        />
+        <Tooltip />
         <Legend />
         <Bar dataKey="p50" name="p50" fill="#2e7d32" radius={[3, 3, 0, 0]} />
         <Bar dataKey="p95" name="p95" fill="#d4a017" radius={[3, 3, 0, 0]} />
