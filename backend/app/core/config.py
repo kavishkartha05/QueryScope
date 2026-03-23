@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "QueryScope"
     debug: bool = False
+    cors_origins: list[str] = ["http://localhost:5173"]
 
     # Azure AI Search
     azure_search_endpoint: str = ""
