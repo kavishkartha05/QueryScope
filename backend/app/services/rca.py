@@ -11,6 +11,8 @@ from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.settings import Settings as LlamaSettings
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.azureaisearch import AzureAISearchVectorStore, IndexManagement
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
@@ -18,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
 You are a performance engineer analyzing API benchmark results.
-You will be given context extracted from historical benchmark runs.
+You will be given two sources of context:
+  1. Recent runs — the 5 most recent completed benchmark runs from the database.
+  2. Semantically similar runs — runs retrieved from a vector search index that \
+are most relevant to the question.
 Use ONLY the provided context to answer the question — do not invent data.
 If the context is insufficient, say so clearly.
 Return a concise root cause diagnosis (3–5 sentences maximum).
@@ -29,16 +34,60 @@ _PROMPT = ChatPromptTemplate.from_messages(
         ("system", _SYSTEM_PROMPT),
         (
             "human",
-            "Context from benchmark runs:\n{context}\n\nQuestion: {question}",
+            "Recent runs (latest 5 from Postgres):\n{recent_context}"
+            "\n\n---\n\n"
+            "Semantically similar runs (from vector search):\n{semantic_context}"
+            "\n\nQuestion: {question}",
         ),
     ]
 )
 
 
-async def diagnose(question: str) -> str:
+async def _fetch_recent_runs_context(db: AsyncSession) -> str:
     """
-    Retrieve relevant benchmark run summaries from Azure AI Search and run
-    them through a LangChain LCEL chain to produce a root cause diagnosis.
+    Query the 5 most recent completed runs with their metrics from Postgres
+    and format them as a human-readable block for the LLM prompt.
+    """
+    # Import here to avoid circular imports at module load time.
+    from app.models.run import Metrics, Run, RunStatus
+
+    result = await db.execute(
+        select(Run)
+        .where(Run.status == RunStatus.done)
+        .order_by(Run.created_at.desc())
+        .limit(5)
+    )
+    # unique() required because selectin-loaded relationships cause duplicate rows.
+    runs = result.scalars().unique().all()
+
+    if not runs:
+        return "(No completed runs found in the database.)"
+
+    lines: list[str] = []
+    for run in runs:
+        m = run.metrics[0] if run.metrics else None
+        metrics_str = (
+            f"p50={m.p50:.1f}ms  p95={m.p95:.1f}ms  p99={m.p99:.1f}ms  "
+            f"throughput={m.throughput:.2f}req/s  error_rate={m.error_rate:.2%}"
+            if m
+            else "metrics not available"
+        )
+        lines.append(
+            f"run_id={run.id}  url={run.target_url}  method={run.method}  "
+            f"requests={run.num_requests}  concurrency={run.concurrency}  "
+            f"created_at={run.created_at.isoformat()}  {metrics_str}"
+        )
+
+    return "\n".join(lines)
+
+
+async def diagnose(question: str, db: AsyncSession | None = None) -> str:
+    """
+    Produce a root cause diagnosis for the given question.
+
+    If *db* is provided, the 5 most recent completed runs are fetched from
+    Postgres and injected as "Recent runs" context alongside the semantically
+    similar runs retrieved from Azure AI Search.
     """
     credential = AzureKeyCredential(settings.azure_search_key)
 
@@ -83,15 +132,21 @@ async def diagnose(question: str) -> str:
         # More context improves diagnosis quality; 5 keeps the prompt compact.
         retriever = index.as_retriever(similarity_top_k=5)
 
-        logger.info("Retrieving context for question: %s", question)
+        logger.info("Retrieving semantic context for question: %s", question)
         nodes = retriever.retrieve(question)
-        context = "\n\n".join(node.get_content() for node in nodes)
-        logger.info("Retrieved %d nodes for RCA", len(nodes))
+        semantic_context = "\n\n".join(node.get_content() for node in nodes)
+        logger.info("Retrieved %d nodes from vector search", len(nodes))
 
-        # LCEL chain: inject pre-retrieved context + question → prompt → LLM → string.
+        # Fetch recent runs from Postgres when a session is available.
+        if db is not None:
+            logger.info("Fetching recent runs from Postgres for RCA context")
+            recent_context = await _fetch_recent_runs_context(db)
+        else:
+            recent_context = "(Database session not provided — recent runs unavailable.)"
+
+        # LCEL chain: inject both context sources + question → prompt → LLM → string.
         # RunnablePassthrough pipes the inputs dict straight into the prompt;
-        # we don't use a LangChain retriever here because retrieval already ran
-        # above via LlamaIndex (Azure AI Search vector query).
+        # retrieval already ran above (LlamaIndex for vectors, SQLAlchemy for recents).
         llm = ChatOpenAI(
             model="gpt-4o-mini",
             api_key=settings.openai_api_key,  # type: ignore[arg-type]
@@ -106,7 +161,11 @@ async def diagnose(question: str) -> str:
         )
 
         diagnosis: str = await chain.ainvoke(
-            {"context": context, "question": question}
+            {
+                "recent_context": recent_context,
+                "semantic_context": semantic_context,
+                "question": question,
+            }
         )
         logger.info("RCA chain completed for question: %s", question)
         return diagnosis

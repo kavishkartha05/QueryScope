@@ -268,12 +268,12 @@ async def create_llm_benchmark(
 # ---------------------------------------------------------------------------
 
 @router.post("/diagnose", response_model=DiagnoseResponse)
-async def diagnose_run(req: DiagnoseRequest) -> DiagnoseResponse:
+async def diagnose_run(req: DiagnoseRequest, db: DB) -> DiagnoseResponse:
     # Local import keeps rca.py's heavy LangChain/LlamaIndex imports from
     # loading at startup — they're only needed when this endpoint is hit.
     from app.services.rca import diagnose
 
-    result = await diagnose(req.question)
+    result = await diagnose(req.question, db=db)
     return DiagnoseResponse(diagnosis=result)
 
 
