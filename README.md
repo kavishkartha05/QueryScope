@@ -74,7 +74,7 @@ You can also trigger benchmarks directly from Claude Desktop or Cursor via the M
 | Vector store | Azure AI Search |
 | Databases | PostgreSQL (primary), MySQL via aiomysql (adapter swap demo) |
 | MCP server | Node.js, @modelcontextprotocol/sdk |
-| Infra | Docker Compose (local), Kubernetes + HPA (production), AWS EC2 |
+| Infra | Docker Compose (local), Kubernetes + HPA (production)|
 
 ---
 
