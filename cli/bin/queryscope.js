@@ -221,6 +221,26 @@ async function cmdStart() {
     fatal("See output above for details.");
   }
 
+  // Poll until the backend is ready — migrations run at startup so the API
+  // may not be immediately available after the containers start.
+  const apiSpinner = ora("Waiting for backend to be ready…").start();
+  const deadline = Date.now() + 60_000;
+  let apiReady = false;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch("http://localhost:8000/benchmark/runs");
+      if (res.ok) { apiReady = true; break; }
+    } catch {
+      // still starting up
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (!apiReady) {
+    apiSpinner.fail("Backend did not become ready within 60 s");
+    fatal("Check logs with: docker compose logs backend");
+  }
+  apiSpinner.succeed("Backend is ready");
+
   console.log(
     "\n" +
     chalk.dim("  Dashboard  ") + chalk.cyan("http://localhost:5173") + "\n" +
