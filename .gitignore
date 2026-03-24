@@ -9,9 +9,6 @@ dist/
 # Env
 .env
 
-# Poetry
-poetry.lock
-
 # Alembic
 alembic/versions/*.pyc
 
