@@ -137,6 +137,7 @@ interface RunsTableProps {
   runs: Run[];
   total: number;
   error: string | null;
+  onReset: () => Promise<void>;
 }
 
 const TH: React.CSSProperties = {
@@ -158,45 +159,81 @@ const TD: React.CSSProperties = {
   color: "#ccd6f6",
 };
 
-export default function RunsTable({ runs, total, error }: RunsTableProps) {
+export default function RunsTable({ runs, total, error, onReset }: RunsTableProps) {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+
+  async function handleReset() {
+    // browser confirm() is intentionally simple — no custom modal needed here
+    if (!window.confirm("Reset session? This will delete all benchmark runs and clear the diagnosis history.")) {
+      return;
+    }
+    await onReset();
+  }
 
   return (
     <div>
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
-          gap: 10,
+          alignItems: "center",
+          justifyContent: "space-between",
           marginBottom: 18,
         }}
       >
-        <h2
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 13,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              color: "#8892b0",
+            }}
+          >
+            Benchmark Runs
+          </h2>
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+              color: "#7c3aed",
+              background: "rgba(124,58,237,0.12)",
+              padding: "1px 8px",
+              borderRadius: 10,
+              border: "1px solid rgba(124,58,237,0.28)",
+            }}
+          >
+            {total}
+          </span>
+        </div>
+
+        <button
+          onClick={() => void handleReset()}
           style={{
-            margin: 0,
-            fontSize: 13,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            color: "#8892b0",
-          }}
-        >
-          Benchmark Runs
-        </h2>
-        <span
-          style={{
+            padding: "4px 12px",
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: 6,
+            color: "#ef4444",
             fontSize: 11,
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-            color: "#7c3aed",
-            background: "rgba(124,58,237,0.12)",
-            padding: "1px 8px",
-            borderRadius: 10,
-            border: "1px solid rgba(124,58,237,0.28)",
+            fontWeight: 600,
+            cursor: "pointer",
+            letterSpacing: "0.04em",
+            transition: "background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.15)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.45)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.08)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.25)";
           }}
         >
-          {total}
-        </span>
+          Reset Session
+        </button>
       </div>
 
       {error && (

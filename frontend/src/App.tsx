@@ -173,6 +173,14 @@ export default function App() {
     void fetchRuns();
   }
 
+  async function handleReset() {
+    await client.delete("/benchmark/runs");
+    // Clear state immediately so the table and chart empty before the next
+    // poll cycle fires — avoids a brief flash of stale data.
+    setRuns([]);
+    setTotal(0);
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0f" }}>
       <MouseGlow />
@@ -196,7 +204,7 @@ export default function App() {
         </Card>
 
         <Card>
-          <RunsTable runs={runs} total={total} error={fetchError} />
+          <RunsTable runs={runs} total={total} error={fetchError} onReset={handleReset} />
         </Card>
 
         <Card>

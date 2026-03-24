@@ -3,7 +3,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -261,6 +261,21 @@ async def create_llm_benchmark(
     run_id = str(_uuid.uuid4())
     background_tasks.add_task(_execute_llm_benchmark, run_id, req)
     return RunCreatedResponse(run_id=_uuid.UUID(run_id))
+
+
+# ---------------------------------------------------------------------------
+# DELETE /benchmark/runs
+# ---------------------------------------------------------------------------
+
+@router.delete("/runs", status_code=200)
+async def reset_session(db: DB) -> dict[str, str]:
+    # Bulk ORM delete: issues a single DELETE FROM runs to the DB.
+    # The DB-level ondelete="CASCADE" on metrics.run_id handles removing
+    # all child metrics rows — ORM-level cascade doesn't fire for bulk deletes,
+    # so relying on the FK cascade here is intentional and correct.
+    await db.execute(delete(Run))
+    await db.commit()
+    return {"message": "Session reset successfully"}
 
 
 # ---------------------------------------------------------------------------
