@@ -74,7 +74,8 @@ You can also trigger benchmarks directly from Claude Desktop or Cursor via the M
 | Vector store | Azure AI Search |
 | Databases | PostgreSQL (primary), MySQL via aiomysql (adapter swap demo) |
 | MCP server | Node.js, @modelcontextprotocol/sdk |
-| Infra | Docker Compose (local), Kubernetes + HPA (production)|
+| CLI | Node.js, enquirer, ora, chalk, execa |
+| Infra | Docker Compose (local), Kubernetes + HPA (production) |
 
 ---
 
@@ -110,9 +111,35 @@ Connect it to Claude Desktop and you can say "benchmark httpbin with 50 requests
 
 ## Quick Start
 
-### Docker Compose (recommended)
+**Prerequisites:** Docker Desktop, Node.js
+
 ```bash
-git clone https://github.com/kavishkartha/QueryScope.git
+npx queryscope init
+```
+
+That's it. The CLI will prompt you for your API keys, write the `.env`, build and start the full stack, and open the dashboard at http://localhost:5173.
+
+![QueryScope CLI](cli_screenshot.png)
+
+After the first run, start QueryScope any time with:
+
+```bash
+npx queryscope start
+```
+
+To delete all benchmark runs and start fresh:
+
+```bash
+npx queryscope reset
+```
+
+---
+
+## Alternative Setup
+
+### Docker Compose (manual)
+```bash
+git clone https://github.com/kavishkartha05/QueryScope.git
 cd QueryScope
 
 # Configure environment
@@ -232,6 +259,7 @@ The `metrics.latencies` column uses `sa.JSON` instead of PostgreSQL's native `AR
 | `GET` | `/benchmark/runs` | List all runs with metrics |
 | `GET` | `/benchmark/runs/{id}` | Get a specific run |
 | `GET` | `/benchmark/runs/{id}/metrics` | Get raw latencies + aggregates |
+| `DELETE` | `/benchmark/runs` | Reset all benchmark runs and metrics |
 | `POST` | `/benchmark/diagnose` | Natural language root cause analysis |
 | `GET` | `/health` | Health check |
 
