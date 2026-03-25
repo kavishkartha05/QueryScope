@@ -12,9 +12,10 @@
 import chalk from "chalk";
 import ora from "ora";
 import { execa } from "execa";
-import { writeFileSync, existsSync, readFileSync } from "fs";
+import { writeFileSync, existsSync, readFileSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 
 // enquirer's default export is the Enquirer class; named `prompt` lives on it.
 // We import the class and call prompt() as a static-style helper via new instance.
@@ -22,8 +23,9 @@ import Enquirer from "enquirer";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// cli/bin/queryscope.js → go up two levels to reach the project root
-const ROOT = resolve(__dirname, "../..");
+// All runtime state (docker-compose.yml, .env) lives in ~/.queryscope/ so
+// the CLI works from any directory without a local repo clone.
+const ROOT = resolve(homedir(), ".queryscope");
 const ENV_PATH = resolve(ROOT, "backend", ".env");
 
 // Read version once at startup so banner and help text stay in sync.
@@ -74,12 +76,19 @@ function fatal(msg) {
 async function cmdInit() {
   printBanner();
 
-  // ── Check Docker ────────────────────────────────────────────────────────
+  // ── Ensure ~/.queryscope/ exists before any execa calls use it as cwd ───
+  mkdirSync(resolve(ROOT, "backend"), { recursive: true });
+
+  // ── Check Docker ─────────────────────────────────────────────────────────
   const dockerSpinner = ora("Checking Docker…").start();
-  try {
-    await capture("docker", ["info"]);
-    dockerSpinner.succeed("Docker is running");
-  } catch {
+  // reject: false tells execa to never throw on a non-zero exit code — warnings
+  // written to stderr were causing false failures even when Docker was healthy.
+  const dockerResult = await execa("docker", ["info"], {
+    cwd: ROOT,
+    stdio: "pipe",
+    reject: false,
+  });
+  if (dockerResult.exitCode !== 0) {
     dockerSpinner.fail("Docker is not running");
     console.error(
       chalk.yellow(
@@ -89,13 +98,13 @@ async function cmdInit() {
     );
     process.exit(1);
   }
+  dockerSpinner.succeed("Docker is running");
 
-  // ── Collect secrets ─────────────────────────────────────────────────────
+  // ── Collect secrets ──────────────────────────────────────────────────────
   console.log(chalk.dim("\n  Enter your credentials (keys are hidden):\n"));
 
   const enquirer = new Enquirer();
 
-  // enquirer's `password` type masks the value with asterisks.
   const { openaiKey } = await enquirer.prompt({
     type: "password",
     name: "openaiKey",
@@ -117,9 +126,25 @@ async function cmdInit() {
     message: "Azure Search admin key",
   });
 
-  // ── Write backend/.env ──────────────────────────────────────────────────
-  // DATABASE_URL is set via docker-compose environment: override, so the
-  // value here is only used for local (non-Docker) development.
+  // ── Download docker-compose.yml from GitHub ──────────────────────────────
+  const composeSpinner = ora("Downloading docker-compose.yml…").start();
+  const COMPOSE_URL =
+    "https://raw.githubusercontent.com/kavishkartha05/QueryScope/main/docker-compose.yml";
+  try {
+    const res = await fetch(COMPOSE_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const composeText = await res.text();
+    writeFileSync(resolve(ROOT, "docker-compose.yml"), composeText, { encoding: "utf8" });
+    composeSpinner.succeed(`Saved docker-compose.yml → ${ROOT}`);
+  } catch (err) {
+    composeSpinner.fail("Failed to download docker-compose.yml");
+    fatal(
+      `Could not fetch ${COMPOSE_URL}\n  ${err.message}\n` +
+      "  Check your internet connection and try again."
+    );
+  }
+
+  // ── Write ~/.queryscope/backend/.env ─────────────────────────────────────
   const envContent = [
     `DATABASE_URL=postgresql+asyncpg://queryscope:queryscope@postgres:5432/queryscope`,
     `APP_NAME=QueryScope`,
@@ -132,27 +157,31 @@ async function cmdInit() {
   ].join("\n") + "\n";
 
   writeFileSync(ENV_PATH, envContent, { encoding: "utf8" });
-  console.log(chalk.green(`\n  Wrote ${ENV_PATH}`));
+  console.log(chalk.green(`  Wrote ${ENV_PATH}`));
 
-  // ── docker compose up --build -d ─────────────────────────────────────────
+  // ── docker compose up -d (images pulled from Docker Hub, not built) ──────
   console.log("");
-  const buildSpinner = ora("Building and starting QueryScope…").start();
+  const startSpinner = ora("Starting QueryScope…").start();
   try {
-    // Pass stdio:"pipe" so ora owns the terminal; execa errors still surface.
-    await capture("docker", ["compose", "up", "--build", "-d"]);
-    buildSpinner.succeed("Stack is up");
+    const composeResult = await execa("docker", ["compose", "up", "-d"], {
+      cwd: ROOT,
+      stdio: "pipe",
+      reject: false,
+    });
+    if (composeResult.exitCode !== 0) {
+      throw new Error(composeResult.stderr);
+    }
+    startSpinner.succeed("Stack is up");
   } catch (err) {
-    buildSpinner.fail("docker compose up failed");
-    // Re-run with inherited stdio so the user sees the full build log.
+    startSpinner.fail("docker compose up failed");
     console.error(chalk.dim("\nRe-running with full output for debugging:\n"));
-    await run("docker", ["compose", "up", "--build", "-d"]).catch(() => {});
-    fatal("Fix the build error above, then re-run: queryscope init");
+    await run("docker", ["compose", "up", "-d"]).catch(() => {});
+    fatal("Fix the error above, then re-run: queryscope init");
   }
 
-  // ── Wait for backend to be healthy, then create the Azure Search index ──
-  // Poll /benchmark/runs until the API responds (migrations run at startup).
+  // ── Wait for backend to be healthy ───────────────────────────────────────
   const apiSpinner = ora("Waiting for backend to be ready…").start();
-  const deadline = Date.now() + 60_000; // 60 s timeout
+  const deadline = Date.now() + 60_000;
   let apiReady = false;
   while (Date.now() < deadline) {
     try {
@@ -169,8 +198,7 @@ async function cmdInit() {
   }
   apiSpinner.succeed("Backend is ready");
 
-  // Create the Azure AI Search index inside the backend container where the
-  // Python env and credentials are already available.
+  // ── Create Azure Search index ─────────────────────────────────────────────
   const indexSpinner = ora("Creating Azure Search index…").start();
   try {
     await capture("docker", [
@@ -180,18 +208,16 @@ async function cmdInit() {
     indexSpinner.succeed("Azure Search index ready");
   } catch (err) {
     indexSpinner.fail("Index creation failed");
-    // Non-fatal: the index may already exist, or the user may not have Azure
-    // configured yet. Print a warning but don't abort setup.
     console.warn(
       chalk.yellow(
         "\n  Warning: could not create Azure Search index.\n" +
         "  If you skipped Azure setup, diagnose queries won't work until\n" +
-        "  you run: docker compose exec backend python scripts/create_azure_index.py\n"
+        "  you run: docker compose exec backend poetry run python scripts/create_azure_index.py\n"
       )
     );
   }
 
-  // ── Success ─────────────────────────────────────────────────────────────
+  // ── Success ──────────────────────────────────────────────────────────────
   console.log(
     chalk.bold.green("\n  QueryScope is running!\n") +
     chalk.dim("  Dashboard  ") + chalk.cyan("http://localhost:5173") + "\n" +
@@ -203,7 +229,6 @@ async function cmdInit() {
 async function cmdStart() {
   printBanner();
 
-  // Assumes backend/.env already exists from a previous `queryscope init`.
   if (!existsSync(ENV_PATH)) {
     fatal(
       `${ENV_PATH} not found.\n` +
@@ -221,8 +246,7 @@ async function cmdStart() {
     fatal("See output above for details.");
   }
 
-  // Poll until the backend is ready — migrations run at startup so the API
-  // may not be immediately available after the containers start.
+  // Poll until the backend is ready — migrations run at startup.
   const apiSpinner = ora("Waiting for backend to be ready…").start();
   const deadline = Date.now() + 60_000;
   let apiReady = false;
@@ -249,7 +273,6 @@ async function cmdStart() {
 }
 
 async function cmdReset() {
-  // Confirm before destroying data — this is irreversible.
   const enquirer = new Enquirer();
   const { confirmed } = await enquirer.prompt({
     type: "confirm",
@@ -284,7 +307,7 @@ async function cmdReset() {
   }
 }
 
-// ── Router ─────────────────────────────────────────────────────────────────
+// ── Router ──────────────────────────────────────────────────────────────────
 
 const command = process.argv[2];
 
