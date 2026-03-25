@@ -114,7 +114,7 @@ Connect it to Claude Desktop and you can say "benchmark httpbin with 50 requests
 **Prerequisites:** Docker Desktop, Node.js
 
 ```bash
-npx queryscope init
+npx queryscope-cli init
 ```
 
 That's it. The CLI will prompt you for your API keys, write the `.env`, build and start the full stack, and open the dashboard at http://localhost:5173.
@@ -124,13 +124,13 @@ That's it. The CLI will prompt you for your API keys, write the `.env`, build an
 After the first run, start QueryScope any time with:
 
 ```bash
-npx queryscope start
+npx queryscope-cli start
 ```
 
 To delete all benchmark runs and start fresh:
 
 ```bash
-npx queryscope reset
+npx queryscope-cli reset
 ```
 
 ---
