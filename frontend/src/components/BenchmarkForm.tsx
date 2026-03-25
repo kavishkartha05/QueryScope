@@ -102,7 +102,7 @@ export default function BenchmarkForm({ onRunCreated }: BenchmarkFormProps) {
         <div>
           <label style={labelStyle}>Target URL</label>
           <input
-            type="url"
+            type="text"
             value={targetUrl}
             onChange={(e) => setTargetUrl(e.target.value)}
             onFocus={() => setFocused("url")}

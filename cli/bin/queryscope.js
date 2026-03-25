@@ -39,12 +39,12 @@ const ASCII_ART = `
     ████   ██████  ███████ ██   ██    ██    ███████  ██████  ██████   ██       ███████`;
 
 function printBanner() {
-  console.log(chalk.green(ASCII_ART));
+  console.log(chalk.hex('#7c3aed')(ASCII_ART));
 
   // Right-align the version tag to the width of the widest ASCII art line.
   const artWidth = Math.max(...ASCII_ART.split("\n").map((l) => l.length));
   const version = `v${pkg.version}`;
-  console.log(chalk.dim.green(version.padStart(artWidth)));
+  console.log(chalk.dim.hex('#7c3aed')(version.padStart(artWidth)));
 
   console.log(
     chalk.dim("\n  Load testing + AI diagnosis for REST & LLM endpoints\n")
