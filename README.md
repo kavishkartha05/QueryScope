@@ -117,7 +117,7 @@ Connect it to Claude Desktop and you can say "benchmark httpbin with 50 requests
 npx queryscope-cli init
 ```
 
-That's it. The CLI will prompt you for your API keys, write the `.env`, build and start the full stack, and open the dashboard at http://localhost:5173.
+That's it. The CLI will prompt you for your API keys, write the `.env`, pull the Docker images, start the full stack, and open the dashboard at http://localhost:5173.
 
 ![QueryScope CLI](cli_screenshot.png)
 
@@ -132,6 +132,31 @@ To delete all benchmark runs and start fresh:
 ```bash
 npx queryscope-cli reset
 ```
+
+To get the Claude Desktop MCP config snippet:
+
+```bash
+npx queryscope-cli mcp
+```
+
+---
+
+## Claude Desktop Integration
+
+Run `npx queryscope-cli mcp` to print the config snippet, then paste it into `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "queryscope": {
+      "command": "npx",
+      "args": ["queryscope-mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop and you can say *"Use queryscope to benchmark https://api.example.com/endpoint with 20 requests"* — Claude will call the tool, fire the HTTP requests, and analyze the results autonomously.
 
 ---
 
@@ -214,27 +239,6 @@ The HPA scales backend pods from 2 to 6 replicas when CPU exceeds 70%.
 
 ---
 
-## Claude Desktop Integration
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "queryscope": {
-      "command": "/path/to/node",
-      "args": [
-        "/path/to/QueryScope/mcp-server/node_modules/.bin/ts-node",
-        "/path/to/QueryScope/mcp-server/src/index.ts"
-      ]
-    }
-  }
-}
-```
-
-Then ask Claude: *"Use queryscope to benchmark https://api.example.com/endpoint with 20 requests"*
-
----
-
 ## MySQL Adapter
 
 QueryScope defaults to PostgreSQL but supports MySQL via a config swap:
@@ -266,3 +270,10 @@ The `metrics.latencies` column uses `sa.JSON` instead of PostgreSQL's native `AR
 Full interactive docs at `http://localhost:8000/docs`
 
 ---
+
+## npm Packages
+
+| Package | Description |
+|---|---|
+| [`queryscope-cli`](https://www.npmjs.com/package/queryscope-cli) | CLI for setup, start, reset, and MCP config |
+| [`queryscope-mcp`](https://www.npmjs.com/package/queryscope-mcp) | Standalone MCP server for Claude Desktop and Cursor |
