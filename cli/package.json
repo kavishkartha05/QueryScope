@@ -1,5 +1,5 @@
 {
-  "name": "queryscope",
+  "name": "queryscope-cli",
   "version": "1.0.0",
   "description": "CLI for QueryScope — one-command setup and management",
   "type": "module",

@@ -2,7 +2,13 @@
   "name": "queryscope-mcp",
   "version": "0.1.0",
   "description": "MCP server exposing QueryScope benchmark tools to AI assistants",
-  "private": true,
+  "main": "dist/index.js",
+  "bin": {
+    "queryscope-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "start": "ts-node src/index.ts",
     "build": "tsc"

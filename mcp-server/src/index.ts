@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * QueryScope MCP Server
  *

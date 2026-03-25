@@ -272,6 +272,26 @@ async function cmdStart() {
   );
 }
 
+function cmdMcp() {
+  // Print the JSON snippet the user needs to paste into claude_desktop_config.json.
+  // Using npx means the user doesn't need a global install — npx will pull
+  // queryscope-mcp from the npm registry on first use and cache it locally.
+  console.log(`
+  Add this to ${chalk.cyan("~/Library/Application Support/Claude/claude_desktop_config.json")}:
+
+  ${chalk.dim("{")}
+    ${chalk.dim('"mcpServers":')} ${chalk.dim("{")}
+      ${chalk.dim('"queryscope":')} ${chalk.dim("{")}
+        ${chalk.dim('"command":')} ${chalk.green('"npx"')}${chalk.dim(",")}
+        ${chalk.dim('"args":')} ${chalk.green('["queryscope-mcp"]')}
+      ${chalk.dim("}")}
+    ${chalk.dim("}")}
+  ${chalk.dim("}")}
+
+  Then restart Claude Desktop.
+`);
+}
+
 async function cmdReset() {
   const enquirer = new Enquirer();
   const { confirmed } = await enquirer.prompt({
@@ -318,6 +338,7 @@ ${chalk.bold("Usage:")}
   queryscope ${chalk.cyan("init")}    First-time setup: configure secrets, build, and start the stack
   queryscope ${chalk.cyan("start")}   Start the stack (requires a previous init)
   queryscope ${chalk.cyan("reset")}   Delete all benchmark runs and metrics
+  queryscope ${chalk.cyan("mcp")}     Print Claude Desktop MCP config snippet
 `;
 
 switch (command) {
@@ -329,6 +350,9 @@ switch (command) {
     break;
   case "reset":
     await cmdReset();
+    break;
+  case "mcp":
+    cmdMcp();
     break;
   default:
     console.log(HELP);
