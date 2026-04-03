@@ -93,6 +93,133 @@ function StatusBadge({ status }: { status: RunStatus }) {
   );
 }
 
+// ── Baseline badge ─────────────────────────────────────────────────────────
+
+function BaselineBadge() {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px",
+        borderRadius: 20,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.07em",
+        textTransform: "uppercase",
+        color: "#a78bfa",
+        background: "rgba(167,139,250,0.12)",
+        border: "1px solid rgba(167,139,250,0.30)",
+        marginLeft: 6,
+        verticalAlign: "middle",
+      }}
+    >
+      Baseline
+    </span>
+  );
+}
+
+// ── Delta chip ─────────────────────────────────────────────────────────────
+
+function DeltaChip({ value }: { value: number }) {
+  // ±2% threshold = negligible; outside = regression (red) or improvement (green)
+  const negligible = Math.abs(value) <= 2;
+  const regression = value > 2;
+
+  const color = negligible ? "#6b7280" : regression ? "#ef4444" : "#10b981";
+  const bg = negligible
+    ? "rgba(107,114,128,0.10)"
+    : regression
+    ? "rgba(239,68,68,0.12)"
+    : "rgba(16,185,129,0.12)";
+  const border = negligible
+    ? "rgba(107,114,128,0.25)"
+    : regression
+    ? "rgba(239,68,68,0.30)"
+    : "rgba(16,185,129,0.30)";
+
+  const sign = value > 0 ? "+" : "";
+  const label = `${sign}${Math.round(value)}%`;
+
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        marginLeft: 5,
+        padding: "1px 6px",
+        borderRadius: 10,
+        fontSize: 10,
+        fontWeight: 700,
+        fontFamily:
+          "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+        color,
+        background: bg,
+        border: `1px solid ${border}`,
+        verticalAlign: "middle",
+        letterSpacing: "0.02em",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ── Pin button ─────────────────────────────────────────────────────────────
+
+function PinButton({
+  active,
+  onClick,
+}: {
+  active: boolean;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={active ? "Current baseline" : "Pin as baseline"}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: "none",
+        border: "none",
+        cursor: active ? "default" : "pointer",
+        padding: "2px 4px",
+        borderRadius: 4,
+        color: active
+          ? "#a78bfa"
+          : hovered
+          ? "#ccd6f6"
+          : "#3d3d5c",
+        transition: "color 0.15s",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {/* Thumbtack SVG icon */}
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill={active ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <line x1="12" y1="17" x2="12" y2="22" />
+        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+      </svg>
+    </button>
+  );
+}
+
 // ── Tooltip ────────────────────────────────────────────────────────────────
 
 function Tip({ text, children }: { text: string; children: React.ReactNode }) {
@@ -138,6 +265,7 @@ interface RunsTableProps {
   total: number;
   error: string | null;
   onReset: () => Promise<void>;
+  onSetBaseline: (runId: string) => Promise<void>;
 }
 
 const TH: React.CSSProperties = {
@@ -159,8 +287,10 @@ const TD: React.CSSProperties = {
   color: "#ccd6f6",
 };
 
-export default function RunsTable({ runs, total, error, onReset }: RunsTableProps) {
+export default function RunsTable({ runs, total, error, onReset, onSetBaseline }: RunsTableProps) {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+
+  const hasBaseline = runs.some((r) => r.is_baseline);
 
   async function handleReset() {
     // browser confirm() is intentionally simple — no custom modal needed here
@@ -252,13 +382,37 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
         </div>
       )}
 
+      {/* Prompt to pin a baseline when runs exist but none is pinned yet */}
+      {runs.length > 0 && !hasBaseline && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "8px 14px",
+            background: "rgba(167,139,250,0.06)",
+            border: "1px solid rgba(167,139,250,0.18)",
+            borderRadius: 8,
+            color: "#8892b0",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="17" x2="12" y2="22" />
+            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+          </svg>
+          Pin a completed run as baseline to track regressions across future runs
+        </div>
+      )}
+
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["ID", "URL", "Method", "Status", "p50 ms", "p95 ms", "p99 ms", "When"].map(
+              {["", "ID", "URL", "Method", "Status", "p50 ms", "p95 ms", "p99 ms", "When"].map(
                 (col) => (
-                  <th key={col} style={TH}>
+                  <th key={col} style={col === "" ? { ...TH, width: 32, padding: "10px 6px" } : TH}>
                     {col}
                   </th>
                 )
@@ -272,13 +426,23 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
                 onMouseEnter={() => setHoveredRow(run.id)}
                 onMouseLeave={() => setHoveredRow(null)}
                 style={{
-                  background:
-                    hoveredRow === run.id
-                      ? "rgba(124,58,237,0.04)"
-                      : "transparent",
+                  background: run.is_baseline
+                    ? "rgba(167,139,250,0.05)"
+                    : hoveredRow === run.id
+                    ? "rgba(124,58,237,0.04)"
+                    : "transparent",
                   transition: "background 0.15s",
                 }}
               >
+                {/* Pin button — only shown for completed runs */}
+                <td style={{ ...TD, padding: "11px 6px", width: 32, textAlign: "center" }}>
+                  {run.status === "done" && (
+                    <PinButton
+                      active={run.is_baseline}
+                      onClick={() => void onSetBaseline(run.id)}
+                    />
+                  )}
+                </td>
                 <td
                   style={{
                     ...TD,
@@ -288,6 +452,7 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
                   }}
                 >
                   <Tip text={run.id}>{run.id.slice(0, 8)}…</Tip>
+                  {run.is_baseline && <BaselineBadge />}
                 </td>
                 <td style={{ ...TD, maxWidth: 220 }}>
                   <Tip text={run.target_url}>
@@ -330,6 +495,9 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
                   }}
                 >
                   {fmt(run.metrics?.p50)}
+                  {run.delta_p50_pct !== undefined && (
+                    <DeltaChip value={run.delta_p50_pct} />
+                  )}
                 </td>
                 <td
                   style={{
@@ -340,6 +508,9 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
                   }}
                 >
                   {fmt(run.metrics?.p95)}
+                  {run.delta_p95_pct !== undefined && (
+                    <DeltaChip value={run.delta_p95_pct} />
+                  )}
                 </td>
                 <td
                   style={{
@@ -350,6 +521,9 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
                   }}
                 >
                   {fmt(run.metrics?.p99)}
+                  {run.delta_p99_pct !== undefined && (
+                    <DeltaChip value={run.delta_p99_pct} />
+                  )}
                 </td>
                 <td style={{ ...TD, color: "#8892b0", fontSize: 12 }}>
                   {relativeTime(run.created_at)}
@@ -359,7 +533,7 @@ export default function RunsTable({ runs, total, error, onReset }: RunsTableProp
             {runs.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   style={{
                     ...TD,
                     textAlign: "center",

@@ -181,6 +181,13 @@ export default function App() {
     setTotal(0);
   }
 
+  async function handleSetBaseline(runId: string) {
+    await client.patch(`/benchmark/runs/${runId}/baseline`);
+    // Refresh immediately so the new baseline and all deltas render without
+    // waiting for the next 3-second poll cycle.
+    void fetchRuns();
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0f" }}>
       <MouseGlow />
@@ -204,7 +211,7 @@ export default function App() {
         </Card>
 
         <Card>
-          <RunsTable runs={runs} total={total} error={fetchError} onReset={handleReset} />
+          <RunsTable runs={runs} total={total} error={fetchError} onReset={handleReset} onSetBaseline={handleSetBaseline} />
         </Card>
 
         <Card>

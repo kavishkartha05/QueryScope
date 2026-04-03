@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -51,6 +52,15 @@ class Run(Base):
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
+    )
+    # At most one row has is_baseline=True at any time — enforced in the API
+    # layer rather than via a partial unique index so it works on both
+    # Postgres and MySQL (the adapter swap demo target).
+    is_baseline: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.text("false"),
     )
 
     # back_populates keeps both sides of the relationship in sync in-memory.

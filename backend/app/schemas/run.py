@@ -68,9 +68,18 @@ class RunResponse(BaseModel):
     num_requests: int
     concurrency: int
     status: RunStatus
+    is_baseline: bool = False
     created_at: datetime
     # None until the background task finishes persisting results.
     metrics: MetricsSummary | None = None
+    # Percentage deltas relative to the pinned baseline run.
+    # Positive = regression, negative = improvement.
+    # Only present on non-baseline runs when a baseline is set; omitted otherwise.
+    delta_p50_pct: float | None = None
+    delta_p95_pct: float | None = None
+    delta_p99_pct: float | None = None
+    delta_avg_latency_pct: float | None = None
+    delta_error_rate_pct: float | None = None
 
     model_config = {"from_attributes": True}
 

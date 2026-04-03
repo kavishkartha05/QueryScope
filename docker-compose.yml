@@ -16,7 +16,8 @@ services:
       retries: 10
 
   backend:
-    image: kavish01/queryscope-backend:latest
+    build: ./backend
+    # image: kavish01/queryscope-backend:latest
     ports:
       - "8000:8000"
     depends_on:
@@ -28,7 +29,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://queryscope:queryscope@postgres:5432/queryscope
 
   frontend:
-    image: kavish01/queryscope-frontend:latest
+    build: ./frontend
+    # image: kavish01/queryscope-frontend:latest
     ports:
       - "5173:4173"
     depends_on:

@@ -23,7 +23,7 @@ interface ChartRow {
 
 export default function LatencyChart({ runs }: LatencyChartProps) {
   const data: ChartRow[] = runs
-    .filter((r) => r.status === "done" && r.metrics !== null)
+    .filter((r) => r.status === "done" && r.metrics != null)
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     .map((r) => ({
       id: r.id.slice(0, 8),

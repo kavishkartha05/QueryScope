@@ -21,8 +21,18 @@ export interface Run {
   num_requests: number;
   concurrency: number;
   status: RunStatus;
+  is_baseline: boolean;
   created_at: string;
-  metrics: MetricsSummary | null;
+  // Absent (undefined) when the run has not completed yet.
+  // response_model_exclude_none=True on the list endpoint omits the field
+  // rather than returning null, so we use optional here.
+  metrics?: MetricsSummary | null;
+  // Delta fields — only present on non-baseline runs when a baseline is pinned.
+  delta_p50_pct?: number;
+  delta_p95_pct?: number;
+  delta_p99_pct?: number;
+  delta_avg_latency_pct?: number;
+  delta_error_rate_pct?: number;
 }
 
 export interface PaginatedRuns {

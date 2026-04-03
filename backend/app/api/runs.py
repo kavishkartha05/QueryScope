@@ -3,7 +3,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, false, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -145,7 +145,7 @@ async def create_benchmark(
 # GET /runs
 # ---------------------------------------------------------------------------
 
-@router.get("/runs", response_model=PaginatedRuns)
+@router.get("/runs", response_model=PaginatedRuns, response_model_exclude_none=True)
 async def list_runs(
     db: DB,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -161,12 +161,63 @@ async def list_runs(
     # the joined rows that SQLAlchemy emits internally.
     runs = runs_result.scalars().unique().all()
 
+    # Fetch the current baseline so deltas can be computed for every other run.
+    baseline_result = await db.execute(
+        select(Run).where(Run.is_baseline == True)  # noqa: E712
+    )
+    baseline = baseline_result.scalars().first()
+    baseline_metrics = baseline.metrics[0] if (baseline and baseline.metrics) else None
+
     return PaginatedRuns(
         total=total,
         offset=offset,
         limit=limit,
-        items=[_run_to_response(r) for r in runs],
+        items=[_run_to_response(r, baseline_metrics=baseline_metrics) for r in runs],
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /runs/baseline  — must be defined before /runs/{run_id} so that the
+# static path segment "baseline" is matched first.
+# ---------------------------------------------------------------------------
+
+@router.get("/runs/baseline", response_model=RunResponse)
+async def get_baseline_run(db: DB) -> RunResponse:
+    result = await db.execute(
+        select(Run).where(Run.is_baseline == True)  # noqa: E712
+    )
+    baseline = result.scalars().first()
+    if baseline is None:
+        raise HTTPException(status_code=404, detail="No baseline run is set")
+    return _run_to_response(baseline)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /runs/{run_id}/baseline
+# ---------------------------------------------------------------------------
+
+@router.patch("/runs/{run_id}/baseline", response_model=RunResponse)
+async def set_baseline(run_id: uuid.UUID, db: DB) -> RunResponse:
+    run = await db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.is_baseline:
+        raise HTTPException(status_code=400, detail="Run is already the baseline")
+
+    # Clear any existing baseline before setting the new one — only one may
+    # exist at a time. Using a bulk UPDATE avoids a separate SELECT + loop.
+    # synchronize_session=False skips the in-memory cache update; the commit
+    # and refresh below make the session consistent again.
+    await db.execute(
+        update(Run)
+        .where(Run.is_baseline == True)  # noqa: E712
+        .values(is_baseline=False)
+        .execution_options(synchronize_session=False)
+    )
+    run.is_baseline = True
+    await db.commit()
+    await db.refresh(run)
+    return _run_to_response(run)
 
 
 # ---------------------------------------------------------------------------
@@ -296,13 +347,29 @@ async def diagnose_run(req: DiagnoseRequest, db: DB) -> DiagnoseResponse:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_to_response(run: Run) -> RunResponse:
+def _pct_delta(current: float, baseline: float) -> float:
+    """Return percentage change of current vs baseline (positive = regression).
+    Returns 0.0 when baseline is zero to avoid division-by-zero."""
+    if baseline == 0:
+        return 0.0
+    return (current - baseline) / baseline * 100.0
+
+
+def _avg(latencies: list[float]) -> float:
+    """Mean latency; returns 0.0 for empty lists."""
+    return sum(latencies) / len(latencies) if latencies else 0.0
+
+
+def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> RunResponse:
     """
     Map ORM Run → RunResponse.
 
     metrics is a list on the ORM side (one run could have multiple snapshots
     in theory); we take the first entry for the summary because we only ever
     write one Metrics row per run today.
+
+    When baseline_metrics is provided and this run is not itself the baseline,
+    percentage deltas are computed and included in the response.
     """
     from app.schemas.run import MetricsSummary
 
@@ -311,6 +378,24 @@ def _run_to_response(run: Run) -> RunResponse:
         m = run.metrics[0]
         metrics_summary = MetricsSummary.model_validate(m)
 
+    # Compute deltas only for non-baseline runs that have completed metrics
+    # and when a baseline with metrics exists.
+    delta_p50_pct = None
+    delta_p95_pct = None
+    delta_p99_pct = None
+    delta_avg_latency_pct = None
+    delta_error_rate_pct = None
+
+    if baseline_metrics and not run.is_baseline and run.metrics:
+        m = run.metrics[0]
+        delta_p50_pct = _pct_delta(m.p50, baseline_metrics.p50)
+        delta_p95_pct = _pct_delta(m.p95, baseline_metrics.p95)
+        delta_p99_pct = _pct_delta(m.p99, baseline_metrics.p99)
+        delta_avg_latency_pct = _pct_delta(
+            _avg(m.latencies), _avg(baseline_metrics.latencies)
+        )
+        delta_error_rate_pct = _pct_delta(m.error_rate, baseline_metrics.error_rate)
+
     return RunResponse(
         id=run.id,
         target_url=run.target_url,
@@ -318,6 +403,12 @@ def _run_to_response(run: Run) -> RunResponse:
         num_requests=run.num_requests,
         concurrency=run.concurrency,
         status=run.status,
+        is_baseline=run.is_baseline,
         created_at=run.created_at,
         metrics=metrics_summary,
+        delta_p50_pct=delta_p50_pct,
+        delta_p95_pct=delta_p95_pct,
+        delta_p99_pct=delta_p99_pct,
+        delta_avg_latency_pct=delta_avg_latency_pct,
+        delta_error_rate_pct=delta_error_rate_pct,
     )
