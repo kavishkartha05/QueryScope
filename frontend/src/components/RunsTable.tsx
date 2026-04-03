@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { Run, RunStatus } from "../types/run";
+import { Fragment, useState } from "react";
+import type { Run, RunStatus, SlaThresholdResult } from "../types/run";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -17,6 +17,15 @@ function relativeTime(iso: string): string {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
+
+// Human-readable labels and units for each SLA metric key.
+const METRIC_META: Record<string, { label: string; unit: string }> = {
+  p50_ms: { label: "P50", unit: "ms" },
+  p95_ms: { label: "P95", unit: "ms" },
+  p99_ms: { label: "P99", unit: "ms" },
+  avg_latency_ms: { label: "Avg Latency", unit: "ms" },
+  error_rate_pct: { label: "Error Rate", unit: "%" },
+};
 
 // ── Status badge ───────────────────────────────────────────────────────────
 
@@ -82,10 +91,8 @@ function StatusBadge({ status }: { status: RunStatus }) {
           display: "inline-block",
           flexShrink: 0,
           animation: cfg.dotAnim,
-          border:
-            status === "running" ? `1.5px solid ${cfg.color}` : "none",
-          borderTopColor:
-            status === "running" ? "transparent" : undefined,
+          border: status === "running" ? `1.5px solid ${cfg.color}` : "none",
+          borderTopColor: status === "running" ? "transparent" : undefined,
         }}
       />
       {cfg.label}
@@ -123,7 +130,6 @@ function BaselineBadge() {
 // ── Delta chip ─────────────────────────────────────────────────────────────
 
 function DeltaChip({ value }: { value: number }) {
-  // ±2% threshold = negligible; outside = regression (red) or improvement (green)
   const negligible = Math.abs(value) <= 2;
   const regression = value > 2;
 
@@ -165,17 +171,166 @@ function DeltaChip({ value }: { value: number }) {
   );
 }
 
-// ── Pin button ─────────────────────────────────────────────────────────────
+// ── SLA badge ──────────────────────────────────────────────────────────────
 
-function PinButton({
-  active,
+function SlaBadge({
+  status,
   onClick,
 }: {
-  active: boolean;
+  status: "pass" | "fail";
   onClick: () => void;
 }) {
-  const [hovered, setHovered] = useState(false);
+  const pass = status === "pass";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Click to view threshold breakdown"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "2px 9px",
+        borderRadius: 20,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        cursor: "pointer",
+        color: pass ? "#10b981" : "#ef4444",
+        background: pass ? "rgba(16,185,129,0.10)" : "rgba(239,68,68,0.10)",
+        border: `1px solid ${pass ? "rgba(16,185,129,0.28)" : "rgba(239,68,68,0.28)"}`,
+        transition: "filter 0.15s",
+      }}
+      onMouseEnter={(e) =>
+        ((e.currentTarget as HTMLButtonElement).style.filter = "brightness(1.2)")
+      }
+      onMouseLeave={(e) =>
+        ((e.currentTarget as HTMLButtonElement).style.filter = "none")
+      }
+    >
+      {pass ? "✓" : "✕"} SLA {pass ? "Pass" : "Fail"}
+    </button>
+  );
+}
 
+// ── SLA breakdown row ──────────────────────────────────────────────────────
+
+function SlaBreakdownRow({
+  thresholds,
+  colSpan,
+}: {
+  thresholds: SlaThresholdResult[];
+  colSpan: number;
+}) {
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        style={{
+          padding: "0 14px 14px 46px",
+          borderBottom: "1px solid #1a1a2e",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            maxWidth: 560,
+            borderCollapse: "collapse",
+            fontSize: 12,
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+          }}
+        >
+          <thead>
+            <tr>
+              {["Metric", "Target", "Actual", "Delta", ""].map((h) => (
+                <th
+                  key={h}
+                  style={{
+                    textAlign: "left",
+                    padding: "5px 10px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "#8892b0",
+                    borderBottom: "1px solid #1a1a2e",
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {thresholds.map((t) => {
+              const meta = METRIC_META[t.metric] ?? { label: t.metric, unit: "" };
+              const overBudget = t.delta > 0;
+              const deltaSign = t.delta > 0 ? "+" : "";
+              const deltaStr = `${deltaSign}${t.delta.toFixed(1)}${meta.unit}`;
+
+              return (
+                <tr key={t.metric}>
+                  <td style={{ padding: "5px 10px", color: "#ccd6f6" }}>
+                    {meta.label}
+                  </td>
+                  <td style={{ padding: "5px 10px", color: "#8892b0" }}>
+                    {t.target.toFixed(1)}
+                    {meta.unit}
+                  </td>
+                  <td style={{ padding: "5px 10px", color: "#ccd6f6" }}>
+                    {t.actual.toFixed(1)}
+                    {meta.unit}
+                  </td>
+                  <td
+                    style={{
+                      padding: "5px 10px",
+                      color: overBudget ? "#ef4444" : "#10b981",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {deltaStr}
+                  </td>
+                  <td style={{ padding: "5px 10px" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "1px 8px",
+                        borderRadius: 10,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: t.status === "pass" ? "#10b981" : "#ef4444",
+                        background:
+                          t.status === "pass"
+                            ? "rgba(16,185,129,0.10)"
+                            : "rgba(239,68,68,0.10)",
+                        border: `1px solid ${
+                          t.status === "pass"
+                            ? "rgba(16,185,129,0.28)"
+                            : "rgba(239,68,68,0.28)"
+                        }`,
+                      }}
+                    >
+                      {t.status}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  );
+}
+
+// ── Pin button ─────────────────────────────────────────────────────────────
+
+function PinButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
   return (
     <button
       onClick={(e) => {
@@ -191,18 +346,13 @@ function PinButton({
         cursor: active ? "default" : "pointer",
         padding: "2px 4px",
         borderRadius: 4,
-        color: active
-          ? "#a78bfa"
-          : hovered
-          ? "#ccd6f6"
-          : "#3d3d5c",
+        color: active ? "#a78bfa" : hovered ? "#ccd6f6" : "#3d3d5c",
         transition: "color 0.15s",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      {/* Thumbtack SVG icon */}
       <svg
         width="13"
         height="13"
@@ -287,13 +437,20 @@ const TD: React.CSSProperties = {
   color: "#ccd6f6",
 };
 
+const COL_COUNT = 10; // pin + ID + URL + Method + Status + SLA + p50 + p95 + p99 + When
+
 export default function RunsTable({ runs, total, error, onReset, onSetBaseline }: RunsTableProps) {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
+  // ID of the run whose SLA breakdown is currently expanded.
+  const [expandedSla, setExpandedSla] = useState<string | null>(null);
 
   const hasBaseline = runs.some((r) => r.is_baseline);
 
+  function toggleSla(runId: string) {
+    setExpandedSla((prev) => (prev === runId ? null : runId));
+  }
+
   async function handleReset() {
-    // browser confirm() is intentionally simple — no custom modal needed here
     if (!window.confirm("Reset session? This will delete all benchmark runs and clear the diagnosis history.")) {
       return;
     }
@@ -382,7 +539,6 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
         </div>
       )}
 
-      {/* Prompt to pin a baseline when runs exist but none is pinned yet */}
       {runs.length > 0 && !hasBaseline && (
         <div
           style={{
@@ -410,9 +566,12 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["", "ID", "URL", "Method", "Status", "p50 ms", "p95 ms", "p99 ms", "When"].map(
+              {["", "ID", "URL", "Method", "Status", "SLA", "p50 ms", "p95 ms", "p99 ms", "When"].map(
                 (col) => (
-                  <th key={col} style={col === "" ? { ...TH, width: 32, padding: "10px 6px" } : TH}>
+                  <th
+                    key={col}
+                    style={col === "" ? { ...TH, width: 32, padding: "10px 6px" } : TH}
+                  >
                     {col}
                   </th>
                 )
@@ -420,120 +579,160 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => (
-              <tr
-                key={run.id}
-                onMouseEnter={() => setHoveredRow(run.id)}
-                onMouseLeave={() => setHoveredRow(null)}
-                style={{
-                  background: run.is_baseline
-                    ? "rgba(167,139,250,0.05)"
-                    : hoveredRow === run.id
-                    ? "rgba(124,58,237,0.04)"
-                    : "transparent",
-                  transition: "background 0.15s",
-                }}
-              >
-                {/* Pin button — only shown for completed runs */}
-                <td style={{ ...TD, padding: "11px 6px", width: 32, textAlign: "center" }}>
-                  {run.status === "done" && (
-                    <PinButton
-                      active={run.is_baseline}
-                      onClick={() => void onSetBaseline(run.id)}
-                    />
-                  )}
-                </td>
-                <td
-                  style={{
-                    ...TD,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                    fontSize: 11,
-                  }}
-                >
-                  <Tip text={run.id}>{run.id.slice(0, 8)}…</Tip>
-                  {run.is_baseline && <BaselineBadge />}
-                </td>
-                <td style={{ ...TD, maxWidth: 220 }}>
-                  <Tip text={run.target_url}>
-                    <span
+            {runs.map((run) => {
+              const slaStatus = run.sla_result?.status;
+              const slaExpanded = expandedSla === run.id;
+
+              return (
+                <Fragment key={run.id}>
+                  <tr
+                    onMouseEnter={() => setHoveredRow(run.id)}
+                    onMouseLeave={() => setHoveredRow(null)}
+                    style={{
+                      background: run.is_baseline
+                        ? "rgba(167,139,250,0.05)"
+                        : hoveredRow === run.id
+                        ? "rgba(124,58,237,0.04)"
+                        : "transparent",
+                      transition: "background 0.15s",
+                    }}
+                  >
+                    {/* Pin button */}
+                    <td style={{ ...TD, padding: "11px 6px", width: 32, textAlign: "center" }}>
+                      {run.status === "done" && (
+                        <PinButton
+                          active={run.is_baseline}
+                          onClick={() => void onSetBaseline(run.id)}
+                        />
+                      )}
+                    </td>
+
+                    {/* ID + baseline badge */}
+                    <td
                       style={{
-                        display: "block",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        maxWidth: 220,
+                        ...TD,
                         fontFamily:
                           "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
                         fontSize: 11,
-                        color: "#8892b0",
                       }}
                     >
-                      {run.target_url}
-                    </span>
-                  </Tip>
-                </td>
-                <td
-                  style={{
-                    ...TD,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                    fontSize: 11,
-                  }}
-                >
-                  {run.method}
-                </td>
-                <td style={TD}>
-                  <StatusBadge status={run.status} />
-                </td>
-                <td
-                  style={{
-                    ...TD,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                    color: "#10b981",
-                  }}
-                >
-                  {fmt(run.metrics?.p50)}
-                  {run.delta_p50_pct !== undefined && (
-                    <DeltaChip value={run.delta_p50_pct} />
+                      <Tip text={run.id}>{run.id.slice(0, 8)}…</Tip>
+                      {run.is_baseline && <BaselineBadge />}
+                    </td>
+
+                    {/* URL */}
+                    <td style={{ ...TD, maxWidth: 200 }}>
+                      <Tip text={run.target_url}>
+                        <span
+                          style={{
+                            display: "block",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            maxWidth: 200,
+                            fontFamily:
+                              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                            fontSize: 11,
+                            color: "#8892b0",
+                          }}
+                        >
+                          {run.target_url}
+                        </span>
+                      </Tip>
+                    </td>
+
+                    {/* Method */}
+                    <td
+                      style={{
+                        ...TD,
+                        fontFamily:
+                          "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                        fontSize: 11,
+                      }}
+                    >
+                      {run.method}
+                    </td>
+
+                    {/* Run status */}
+                    <td style={TD}>
+                      <StatusBadge status={run.status} />
+                    </td>
+
+                    {/* SLA badge */}
+                    <td style={TD}>
+                      {slaStatus != null && (
+                        <SlaBadge
+                          status={slaStatus}
+                          onClick={() => toggleSla(run.id)}
+                        />
+                      )}
+                    </td>
+
+                    {/* p50 + delta */}
+                    <td
+                      style={{
+                        ...TD,
+                        fontFamily:
+                          "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                        color: "#10b981",
+                      }}
+                    >
+                      {fmt(run.metrics?.p50)}
+                      {run.delta_p50_pct !== undefined && (
+                        <DeltaChip value={run.delta_p50_pct} />
+                      )}
+                    </td>
+
+                    {/* p95 + delta */}
+                    <td
+                      style={{
+                        ...TD,
+                        fontFamily:
+                          "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                        color: "#f59e0b",
+                      }}
+                    >
+                      {fmt(run.metrics?.p95)}
+                      {run.delta_p95_pct !== undefined && (
+                        <DeltaChip value={run.delta_p95_pct} />
+                      )}
+                    </td>
+
+                    {/* p99 + delta */}
+                    <td
+                      style={{
+                        ...TD,
+                        fontFamily:
+                          "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                        color: "#ef4444",
+                      }}
+                    >
+                      {fmt(run.metrics?.p99)}
+                      {run.delta_p99_pct !== undefined && (
+                        <DeltaChip value={run.delta_p99_pct} />
+                      )}
+                    </td>
+
+                    {/* When */}
+                    <td style={{ ...TD, color: "#8892b0", fontSize: 12 }}>
+                      {relativeTime(run.created_at)}
+                    </td>
+                  </tr>
+
+                  {/* Expandable SLA breakdown — rendered below the run row */}
+                  {slaExpanded && run.sla_result && run.sla_result.thresholds.length > 0 && (
+                    <SlaBreakdownRow
+                      thresholds={run.sla_result.thresholds}
+                      colSpan={COL_COUNT}
+                    />
                   )}
-                </td>
-                <td
-                  style={{
-                    ...TD,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                    color: "#f59e0b",
-                  }}
-                >
-                  {fmt(run.metrics?.p95)}
-                  {run.delta_p95_pct !== undefined && (
-                    <DeltaChip value={run.delta_p95_pct} />
-                  )}
-                </td>
-                <td
-                  style={{
-                    ...TD,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                    color: "#ef4444",
-                  }}
-                >
-                  {fmt(run.metrics?.p99)}
-                  {run.delta_p99_pct !== undefined && (
-                    <DeltaChip value={run.delta_p99_pct} />
-                  )}
-                </td>
-                <td style={{ ...TD, color: "#8892b0", fontSize: 12 }}>
-                  {relativeTime(run.created_at)}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
             {runs.length === 0 && (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={COL_COUNT}
                   style={{
                     ...TD,
                     textAlign: "center",

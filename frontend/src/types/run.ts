@@ -33,6 +33,9 @@ export interface Run {
   delta_p99_pct?: number;
   delta_avg_latency_pct?: number;
   delta_error_rate_pct?: number;
+  // SLA — absent when no thresholds were configured for the run.
+  sla_config?: SlaConfig;
+  sla_result?: SlaResult;
 }
 
 export interface PaginatedRuns {
@@ -42,6 +45,27 @@ export interface PaginatedRuns {
   items: Run[];
 }
 
+export interface SlaConfig {
+  p50_ms?: number | null;
+  p95_ms?: number | null;
+  p99_ms?: number | null;
+  avg_latency_ms?: number | null;
+  error_rate_pct?: number | null;
+}
+
+export interface SlaThresholdResult {
+  metric: string;
+  target: number;
+  actual: number;
+  status: "pass" | "fail";
+  delta: number;
+}
+
+export interface SlaResult {
+  status: "pass" | "fail" | null;
+  thresholds: SlaThresholdResult[];
+}
+
 export interface BenchmarkRequest {
   target_url: string;
   method: string;
@@ -49,6 +73,11 @@ export interface BenchmarkRequest {
   concurrency: number;
   headers?: Record<string, string>;
   body?: Record<string, unknown>;
+  sla_p50_ms?: number;
+  sla_p95_ms?: number;
+  sla_p99_ms?: number;
+  sla_avg_latency_ms?: number;
+  sla_error_rate_pct?: number;
 }
 
 export interface RunCreatedResponse {

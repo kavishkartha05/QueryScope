@@ -3,7 +3,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import delete, false, func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -17,6 +17,8 @@ from app.schemas.run import (
     PaginatedRuns,
     RunCreatedResponse,
     RunResponse,
+    SlaConfig,
+    SlaResult,
 )
 from app.services.aggregator import compute_metrics
 from app.services.indexer import index_run
@@ -77,6 +79,43 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
                 **agg,
             )
             session.add(metrics)
+
+            # SLA evaluation — only when at least one threshold was provided.
+            has_sla = any([
+                req.sla_p50_ms is not None,
+                req.sla_p95_ms is not None,
+                req.sla_p99_ms is not None,
+                req.sla_avg_latency_ms is not None,
+                req.sla_error_rate_pct is not None,
+            ])
+            if has_sla:
+                from app.services.sla import evaluate_sla
+
+                sla_config = SlaConfig(
+                    p50_ms=req.sla_p50_ms,
+                    p95_ms=req.sla_p95_ms,
+                    p99_ms=req.sla_p99_ms,
+                    avg_latency_ms=req.sla_avg_latency_ms,
+                    error_rate_pct=req.sla_error_rate_pct,
+                )
+                avg_latency_ms = (
+                    sum(latencies) / len(latencies) if latencies else None
+                )
+                # error_rate from aggregator is stored as 0–1 fraction;
+                # SLA input and comparison are both in percentage (0–100).
+                sla_result = evaluate_sla(
+                    config=sla_config,
+                    p50=agg["p50"],
+                    p95=agg["p95"],
+                    p99=agg["p99"],
+                    avg_latency_ms=avg_latency_ms,
+                    error_rate_pct=agg["error_rate"] * 100,
+                )
+                run.sla_config = sla_config.model_dump(exclude_none=True)
+                run.sla_result = sla_result.model_dump()
+                logger.info(
+                    "SLA evaluation for run %s: %s", run_id, sla_result.status
+                )
 
             run.status = RunStatus.done
             await session.commit()
@@ -396,6 +435,14 @@ def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> Run
         )
         delta_error_rate_pct = _pct_delta(m.error_rate, baseline_metrics.error_rate)
 
+    # Deserialise SLA JSON dicts back to typed Pydantic models.
+    sla_config_obj = (
+        SlaConfig.model_validate(run.sla_config) if run.sla_config else None
+    )
+    sla_result_obj = (
+        SlaResult.model_validate(run.sla_result) if run.sla_result else None
+    )
+
     return RunResponse(
         id=run.id,
         target_url=run.target_url,
@@ -411,4 +458,6 @@ def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> Run
         delta_p99_pct=delta_p99_pct,
         delta_avg_latency_pct=delta_avg_latency_pct,
         delta_error_rate_pct=delta_error_rate_pct,
+        sla_config=sla_config_obj,
+        sla_result=sla_result_obj,
     )

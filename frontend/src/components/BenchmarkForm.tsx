@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import client from "../api/client";
 import type { BenchmarkRequest, RunCreatedResponse } from "../types/run";
 
 interface BenchmarkFormProps {
   onRunCreated: (runId: string) => void;
+  // Incrementing this value triggers a reset of the SLA fields so they don't
+  // carry over into the next benchmark after a session reset.
+  resetKey?: number;
 }
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE"] as const;
@@ -33,7 +36,7 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
-export default function BenchmarkForm({ onRunCreated }: BenchmarkFormProps) {
+export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormProps) {
   const [targetUrl, setTargetUrl] = useState("");
   const [method, setMethod] = useState<HttpMethod>("GET");
   const [numRequests, setNumRequests] = useState(50);
@@ -43,12 +46,37 @@ export default function BenchmarkForm({ onRunCreated }: BenchmarkFormProps) {
   const [successId, setSuccessId] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
 
+  // SLA section
+  const [slaOpen, setSlaOpen] = useState(false);
+  const [slaP50, setSlaP50] = useState("");
+  const [slaP95, setSlaP95] = useState("");
+  const [slaP99, setSlaP99] = useState("");
+  const [slaAvg, setSlaAvg] = useState("");
+  const [slaErr, setSlaErr] = useState("");
+
+  // Clear SLA fields and collapse the section whenever the parent resets the
+  // session. resetKey starts at 0, so the effect is skipped on first render.
+  useEffect(() => {
+    if (!resetKey) return;
+    setSlaP50("");
+    setSlaP95("");
+    setSlaP99("");
+    setSlaAvg("");
+    setSlaErr("");
+    setSlaOpen(false);
+  }, [resetKey]);
+
   function inputStyle(name: string): React.CSSProperties {
     return {
       ...baseInput,
       borderColor: focused === name ? "#7c3aed" : "#1a1a2e",
       boxShadow: focused === name ? "0 0 0 3px rgba(124,58,237,0.18)" : "none",
     };
+  }
+
+  function parseSla(raw: string): number | undefined {
+    const n = parseFloat(raw);
+    return raw.trim() !== "" && !isNaN(n) ? n : undefined;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -63,6 +91,18 @@ export default function BenchmarkForm({ onRunCreated }: BenchmarkFormProps) {
       num_requests: numRequests,
       concurrency,
     };
+
+    // Only include SLA fields that the user actually filled in.
+    const p50 = parseSla(slaP50);
+    const p95 = parseSla(slaP95);
+    const p99 = parseSla(slaP99);
+    const avg = parseSla(slaAvg);
+    const err = parseSla(slaErr);
+    if (p50 !== undefined) payload.sla_p50_ms = p50;
+    if (p95 !== undefined) payload.sla_p95_ms = p95;
+    if (p99 !== undefined) payload.sla_p99_ms = p99;
+    if (avg !== undefined) payload.sla_avg_latency_ms = avg;
+    if (err !== undefined) payload.sla_error_rate_pct = err;
 
     try {
       const res = await client.post<RunCreatedResponse>("/benchmark", payload);
@@ -182,6 +222,177 @@ export default function BenchmarkForm({ onRunCreated }: BenchmarkFormProps) {
             style={{ width: "100%", accentColor: "#7c3aed", cursor: "pointer" }}
           />
         </div>
+      </div>
+
+      {/* SLA Thresholds — collapsible */}
+      <div style={{ marginBottom: 20 }}>
+        <button
+          type="button"
+          onClick={() => setSlaOpen((o) => !o)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            color: slaOpen ? "#a78bfa" : "#8892b0",
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            transition: "color 0.15s",
+          }}
+        >
+          {/* Chevron rotates when open */}
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              transform: slaOpen ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 0.2s",
+              flexShrink: 0,
+            }}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          SLA Thresholds
+          {(slaP50 || slaP95 || slaP99 || slaAvg || slaErr) && (
+            <span
+              style={{
+                padding: "1px 7px",
+                borderRadius: 10,
+                background: "rgba(167,139,250,0.12)",
+                border: "1px solid rgba(167,139,250,0.28)",
+                color: "#a78bfa",
+                fontSize: 10,
+                letterSpacing: "0.04em",
+              }}
+            >
+              configured
+            </span>
+          )}
+        </button>
+
+        {slaOpen && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "16px 18px",
+              background: "rgba(167,139,250,0.04)",
+              border: "1px solid rgba(167,139,250,0.14)",
+              borderRadius: 10,
+            }}
+          >
+            <p
+              style={{
+                margin: "0 0 14px",
+                fontSize: 12,
+                color: "#8892b0",
+                lineHeight: 1.5,
+              }}
+            >
+              Leave any field blank to skip that threshold. A run is marked{" "}
+              <span style={{ color: "#ef4444", fontWeight: 600 }}>SLA Fail</span>{" "}
+              if any configured threshold is exceeded.
+            </p>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 12,
+                marginBottom: 12,
+              }}
+            >
+              <div>
+                <label style={labelStyle}>P50 (ms)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={slaP50}
+                  onChange={(e) => setSlaP50(e.target.value)}
+                  onFocus={() => setFocused("slaP50")}
+                  onBlur={() => setFocused(null)}
+                  placeholder="e.g. 200"
+                  style={inputStyle("slaP50")}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>P95 (ms)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={slaP95}
+                  onChange={(e) => setSlaP95(e.target.value)}
+                  onFocus={() => setFocused("slaP95")}
+                  onBlur={() => setFocused(null)}
+                  placeholder="e.g. 500"
+                  style={inputStyle("slaP95")}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>P99 (ms)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={slaP99}
+                  onChange={(e) => setSlaP99(e.target.value)}
+                  onFocus={() => setFocused("slaP99")}
+                  onBlur={() => setFocused(null)}
+                  placeholder="e.g. 1000"
+                  style={inputStyle("slaP99")}
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div>
+                <label style={labelStyle}>Avg Latency (ms)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={slaAvg}
+                  onChange={(e) => setSlaAvg(e.target.value)}
+                  onFocus={() => setFocused("slaAvg")}
+                  onBlur={() => setFocused(null)}
+                  placeholder="e.g. 250"
+                  style={inputStyle("slaAvg")}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Error Rate (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  value={slaErr}
+                  onChange={(e) => setSlaErr(e.target.value)}
+                  onFocus={() => setFocused("slaErr")}
+                  onBlur={() => setFocused(null)}
+                  placeholder="e.g. 1"
+                  style={inputStyle("slaErr")}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (

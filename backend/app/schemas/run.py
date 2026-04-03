@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -17,6 +18,13 @@ class BenchmarkRequest(BaseModel):
     concurrency: int = Field(ge=1, le=500)
     headers: dict[str, str] | None = None
     body: dict | None = None
+    # SLA thresholds — all optional.  Omit a field to skip that threshold.
+    sla_p50_ms: float | None = Field(default=None, gt=0)
+    sla_p95_ms: float | None = Field(default=None, gt=0)
+    sla_p99_ms: float | None = Field(default=None, gt=0)
+    sla_avg_latency_ms: float | None = Field(default=None, gt=0)
+    # Accepted as a percentage (0–100); stored/compared as a percentage.
+    sla_error_rate_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 class LLMBenchmarkRequest(BaseModel):
@@ -35,6 +43,35 @@ class DiagnoseRequest(BaseModel):
 
 class DiagnoseResponse(BaseModel):
     diagnosis: str
+
+
+# ---------------------------------------------------------------------------
+# SLA schemas
+# ---------------------------------------------------------------------------
+
+class SlaConfig(BaseModel):
+    """The thresholds submitted with the benchmark request."""
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+    p99_ms: float | None = None
+    avg_latency_ms: float | None = None
+    error_rate_pct: float | None = None
+
+
+class SlaThresholdResult(BaseModel):
+    """Evaluation outcome for a single threshold."""
+    metric: str                        # e.g. "p95_ms"
+    target: float                      # configured threshold
+    actual: float                      # measured value
+    status: Literal["pass", "fail"]
+    delta: float                       # actual - target (positive = over budget)
+
+
+class SlaResult(BaseModel):
+    """Aggregated SLA evaluation result stored on the run."""
+    # None only when no thresholds were configured (SlaConfig was all-None).
+    status: Literal["pass", "fail"] | None
+    thresholds: list[SlaThresholdResult]
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +117,9 @@ class RunResponse(BaseModel):
     delta_p99_pct: float | None = None
     delta_avg_latency_pct: float | None = None
     delta_error_rate_pct: float | None = None
+    # SLA config and result — absent when no thresholds were configured.
+    sla_config: SlaConfig | None = None
+    sla_result: SlaResult | None = None
 
     model_config = {"from_attributes": True}
 

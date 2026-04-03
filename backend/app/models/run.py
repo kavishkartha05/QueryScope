@@ -62,6 +62,12 @@ class Run(Base):
         default=False,
         server_default=sa.text("false"),
     )
+    # SLA configuration supplied at run creation time (the input thresholds).
+    # NULL when no SLA thresholds were defined for the run.
+    sla_config: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
+    # Evaluation outcome computed after the run completes.
+    # NULL when no SLA thresholds were defined.
+    sla_result: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
 
     # back_populates keeps both sides of the relationship in sync in-memory.
     metrics: Mapped[list["Metrics"]] = relationship(

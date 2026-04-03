@@ -145,6 +145,7 @@ export default function App() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [visible, setVisible] = useState(false);
+  const [formResetKey, setFormResetKey] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function fetchRuns() {
@@ -179,6 +180,8 @@ export default function App() {
     // poll cycle fires — avoids a brief flash of stale data.
     setRuns([]);
     setTotal(0);
+    // Incrementing the key signals BenchmarkForm to clear its SLA fields.
+    setFormResetKey((k) => k + 1);
   }
 
   async function handleSetBaseline(runId: string) {
@@ -207,7 +210,7 @@ export default function App() {
         }}
       >
         <Card>
-          <BenchmarkForm onRunCreated={handleRunCreated} />
+          <BenchmarkForm onRunCreated={handleRunCreated} resetKey={formResetKey} />
         </Card>
 
         <Card>
