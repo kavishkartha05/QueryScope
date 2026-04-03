@@ -1,6 +1,6 @@
 # QueryScope
 
-> Developer observability tool that runs load benchmarks against REST and LLM-backed API endpoints, stores results, and lets engineers query degradation patterns in natural language via a RAG pipeline.
+> Developer observability tool that runs load benchmarks against REST and LLM-backed API endpoints, stores results, tracks regressions against a pinned baseline, enforces SLA thresholds, and lets engineers query degradation patterns in natural language via a RAG pipeline.
 
 **The gap QueryScope fills:** existing load testers (k6, JMeter) produce static reports with no AI layer. LLM observability tools (LangSmith, Langfuse) monitor AI apps but don't run load tests. QueryScope sits in the middle — self-hostable, open-source, and AI-powered.
 
@@ -38,6 +38,7 @@ You can also trigger benchmarks directly from Claude Desktop or Cursor via the M
 │  GET  /runs          → PostgreSQL via async SQLAlchemy   │
 │  POST /diagnose      → LangChain RCA chain               │
 │  POST /benchmark/llm → LLM endpoint benchmarking (TTFT)  │
+│  PATCH /runs/:id/baseline → Baseline pinning             │
 └──────┬──────────────────────┬────────────────────────────┘
        │                      │
 ┌──────▼──────┐    ┌──────────▼────────────────────────────┐
@@ -83,6 +84,12 @@ You can also trigger benchmarks directly from Claude Desktop or Cursor via the M
 
 ### Load benchmarking
 QueryScope fires configurable concurrent HTTP requests at any REST endpoint using `httpx.AsyncClient` with an `asyncio.Semaphore` for concurrency control. Each request's latency is recorded in milliseconds. After all requests complete, `numpy.percentile` computes p50/p95/p99. Results are stored in PostgreSQL with raw latency arrays for later analysis.
+
+### Baseline pinning and regression detection
+Any completed run can be pinned as a baseline. Once pinned, all subsequent runs automatically compute percentage deltas against it for p50, p95, p99, avg latency, and error rate. Deltas are returned from the API and rendered inline as color-coded chips in the dashboard — red for regressions, green for improvements, gray for negligible change (±2%). Only one baseline can be active at a time; pinning a new run atomically clears the previous one.
+
+### SLA threshold enforcement
+Before running a benchmark, you can optionally define pass/fail SLA thresholds for any combination of p50, p95, p99, avg latency, and error rate. After the run completes, each threshold is evaluated against the actual result and stored on the run record. The dashboard surfaces a prominent SLA Pass or SLA Fail badge per run, with a clickable per-threshold breakdown table showing target, actual, and delta values. SLA config and results are fully persisted — no frontend state involved.
 
 ### LLM endpoint benchmarking
 A dedicated mode for AI APIs measures time-to-first-token (TTFT) and chunks-per-second by consuming the SSE stream incrementally. Useful for comparing OpenAI vs Gemini vs Claude response characteristics under load.
@@ -260,7 +267,9 @@ The `metrics.latencies` column uses `sa.JSON` instead of PostgreSQL's native `AR
 |---|---|---|
 | `POST` | `/benchmark` | Start a REST load benchmark |
 | `POST` | `/benchmark/llm` | Start an LLM endpoint benchmark (TTFT) |
-| `GET` | `/benchmark/runs` | List all runs with metrics |
+| `GET` | `/benchmark/runs` | List all runs with metrics and baseline deltas |
+| `GET` | `/benchmark/runs/baseline` | Get the currently pinned baseline run |
+| `PATCH` | `/benchmark/runs/{id}/baseline` | Pin a run as the baseline |
 | `GET` | `/benchmark/runs/{id}` | Get a specific run |
 | `GET` | `/benchmark/runs/{id}/metrics` | Get raw latencies + aggregates |
 | `DELETE` | `/benchmark/runs` | Reset all benchmark runs and metrics |
