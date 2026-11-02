@@ -98,8 +98,10 @@ async def test_limits_are_read_from_settings(client, monkeypatch):
 async def test_simultaneous_requests_cannot_both_pass_the_check(client):
     _, a_h = await user(client, "alpha-recruiter")
     responses = await asyncio.gather(start(client, a_h), start(client, a_h), start(client, a_h))
-    codes = sorted(r.status_code for r in responses)
-    assert codes == [202, 429, 429]
+    codes = []
+    for response in responses:
+        codes.append(response.status_code)
+    assert sorted(codes) == [202, 429, 429]
     assert await run_count() == 1
 
 
