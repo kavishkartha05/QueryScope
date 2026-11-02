@@ -24,7 +24,7 @@ from app.schemas.run import (
     SlaResult,
 )
 from app.services.aggregator import compute_metrics
-from app.services.indexer import index_run
+from app.services.indexer import delete_run_documents, index_run
 from app.services.quotas import QuotaExceeded, admission_lock, check_quotas
 from app.services.runner import run_benchmark, run_llm_benchmark
 from app.services.ssrf import TargetRejected, validate_target
@@ -452,14 +452,32 @@ async def reset_session(
     if include_demo is None:
         include_demo = not settings.auth_enabled
 
-    # Bulk ORM delete: issues a single DELETE FROM runs to the DB.
-    # The DB-level ondelete="CASCADE" on metrics.run_id handles removing
-    # all child metrics rows — ORM-level cascade doesn't fire for bulk deletes,
-    # so relying on the FK cascade here is intentional and correct.
-    stmt = delete(Run)
+    # Select first: the same ids drive both the index cleanup and the delete,
+    # so a run created meanwhile is neither orphaned nor removed unexpectedly.
+    id_query = select(Run.id)
     if not include_demo:
-        stmt = stmt.where(Run.access_code_id.is_not(None))
-    await db.execute(stmt)
+        id_query = id_query.where(Run.access_code_id.is_not(None))
+    run_ids: list[uuid.UUID] = []
+    for run_id in (await db.execute(id_query)).scalars():
+        run_ids.append(run_id)
+
+    # Index documents go first. If Azure fails, nothing is deleted and the admin
+    # can retry; the other order could leave documents with no run behind them.
+    try:
+        await delete_run_documents(run_ids)
+    except Exception as exc:
+        logger.error("Could not delete search documents (%s); no runs were deleted", type(exc).__name__)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not delete the runs' search documents; no runs were deleted. Try again.",
+        )
+
+    # Bulk ORM delete in batches of ids. The DB-level ondelete="CASCADE" on
+    # metrics.run_id removes child metrics rows (ORM-level cascade doesn't fire
+    # for bulk deletes, so relying on the FK cascade here is intentional).
+    batch_size = 500
+    for start in range(0, len(run_ids), batch_size):
+        await db.execute(delete(Run).where(Run.id.in_(run_ids[start : start + batch_size])))
     await db.commit()
     return {"message": "Session reset successfully"}
 
