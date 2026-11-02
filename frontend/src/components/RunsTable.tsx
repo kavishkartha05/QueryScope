@@ -252,28 +252,9 @@ function SlaBreakdownRow({
   thresholds: SlaThresholdResult[];
   colSpan: number;
 }) {
-  return (
-    <tr>
-      <td
-        colSpan={colSpan}
-        style={{
-          padding: "0 14px 14px 46px",
-          borderBottom: "1px solid #1a1a2e",
-        }}
-      >
-        <table
-          style={{
-            width: "100%",
-            maxWidth: 560,
-            borderCollapse: "collapse",
-            fontSize: 12,
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-          }}
-        >
-          <thead>
-            <tr>
-              {["Metric", "Target", "Actual", "Delta", ""].map((h) => (
+  const slaHeaders: React.ReactNode[] = [];
+  for (const h of ["Metric", "Target", "Actual", "Delta", ""]) {
+    slaHeaders.push(
                 <th
                   key={h}
                   style={{
@@ -289,17 +270,17 @@ function SlaBreakdownRow({
                 >
                   {h}
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {thresholds.map((t) => {
+    );
+  }
+
+  const thresholdRows: React.ReactNode[] = [];
+  for (const t of thresholds) {
               const meta = METRIC_META[t.metric] ?? { label: t.metric, unit: "" };
               const overBudget = t.delta > 0;
               const deltaSign = t.delta > 0 ? "+" : "";
               const deltaStr = `${deltaSign}${t.delta.toFixed(1)}${meta.unit}`;
 
-              return (
+    thresholdRows.push(
                 <tr key={t.metric}>
                   <td style={{ padding: "5px 10px", color: "#ccd6f6" }}>
                     {meta.label}
@@ -347,8 +328,35 @@ function SlaBreakdownRow({
                     </span>
                   </td>
                 </tr>
-              );
-            })}
+    );
+  }
+
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        style={{
+          padding: "0 14px 14px 46px",
+          borderBottom: "1px solid #1a1a2e",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            maxWidth: 560,
+            borderCollapse: "collapse",
+            fontSize: 12,
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+          }}
+        >
+          <thead>
+            <tr>
+              {slaHeaders}
+            </tr>
+          </thead>
+          <tbody>
+            {thresholdRows}
           </tbody>
         </table>
       </td>
