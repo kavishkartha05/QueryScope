@@ -96,6 +96,8 @@ async def run_llm_benchmark(
     prompt: str,
     num_requests: int,
     concurrency: int,
+    pins: dict[str, list[str]],
+    timeout_s: float,
 ) -> dict:
     """
     Benchmark an OpenAI-compatible streaming LLM endpoint.
@@ -130,9 +132,12 @@ async def run_llm_benchmark(
         "stream": True,
     }
 
-    # LLM endpoints can be slow — 120 s covers long generations without
-    # hanging forever on a stalled connection.
-    async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
+    # Same pinned, no-redirect client as the REST engine. The per-request
+    # timeout is capped by the caller (MAX_REQUEST_TIMEOUT_S); it applies to
+    # each connect/read, and the whole run is bounded by the wall-clock limit.
+    async with build_pinned_client(
+        pins, headers=headers, timeout=timeout_s, max_connections=concurrency
+    ) as client:
 
         async def _single_llm_request() -> None:
             nonlocal error_count

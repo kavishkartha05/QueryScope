@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AdminOnly, CurrentPrincipal, get_principal
+from app.api.deps import AdminOnly, CurrentPrincipal, get_principal, require_llm_benchmark_enabled
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.run import Metrics, Run, RunStatus
@@ -360,13 +360,21 @@ async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
 
     logger.info("LLM benchmark task started for run_id=%s", run_id)
     try:
-        result = await run_llm_benchmark(
-            endpoint_url=str(req.endpoint_url),
-            api_key=req.api_key,
-            model=req.model,
-            prompt=req.prompt,
-            num_requests=req.num_requests,
-            concurrency=req.concurrency,
+        # Same guards as the REST benchmark: resolve again right before
+        # connecting, pin the connections, and bound the whole run.
+        target = await validate_target(str(req.endpoint_url))
+        result = await asyncio.wait_for(
+            run_llm_benchmark(
+                endpoint_url=str(req.endpoint_url),
+                api_key=req.api_key,
+                model=req.model,
+                prompt=req.prompt,
+                num_requests=req.num_requests,
+                concurrency=req.concurrency,
+                pins={target.host: target.addresses},
+                timeout_s=_request_timeout(req),
+            ),
+            timeout=settings.run_wall_clock_limit_s,
         )
 
         ttft = np.array(result["ttft_latencies"], dtype=float)
@@ -390,15 +398,31 @@ async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
             avg_tps,
             result["error_count"],
         )
+    except TargetRejected as rejected:
+        logger.warning("LLM benchmark %s refused before connecting: %s", run_id, rejected)
+    except asyncio.TimeoutError:
+        logger.warning("LLM benchmark %s exceeded the wall-clock limit", run_id)
     except Exception as exc:
         logger.exception("LLM benchmark task failed for run_id=%s: %s", run_id, exc)
 
 
-@router.post("/llm", response_model=RunCreatedResponse, status_code=202)
+@router.post(
+    "/llm",
+    response_model=RunCreatedResponse,
+    status_code=202,
+    # Runs after the router-level session check: callers without a valid token
+    # still get 401; authenticated callers get 404 while the feature is off.
+    dependencies=[Depends(require_llm_benchmark_enabled)],
+)
 async def create_llm_benchmark(
     req: LLMBenchmarkRequest,
     background_tasks: BackgroundTasks,
 ) -> RunCreatedResponse:
+    try:
+        await validate_target(str(req.endpoint_url))
+    except TargetRejected as rejected:
+        raise HTTPException(status_code=422, detail=str(rejected))
+
     # Generate a client-visible run_id without a DB row — LLM runs aren't
     # persisted to the runs table yet. The id still lets callers correlate
     # log lines with the request that triggered them.
