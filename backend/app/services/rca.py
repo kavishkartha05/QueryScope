@@ -14,7 +14,10 @@ from llama_index.vector_stores.azureaisearch import AzureAISearchVectorStore, In
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
+
 from app.core.config import settings
+from app.services.scope import search_filter, visible_clause
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,9 @@ _PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-async def _fetch_recent_runs_context(db: AsyncSession) -> str:
+async def _fetch_recent_runs_context(
+    db: AsyncSession, access_code_id: uuid.UUID | None = None
+) -> str:
     """
     Query the 5 most recent completed runs with their metrics from Postgres
     and format them as a human-readable block for the LLM prompt.
@@ -53,7 +58,7 @@ async def _fetch_recent_runs_context(db: AsyncSession) -> str:
 
     result = await db.execute(
         select(Run)
-        .where(Run.status == RunStatus.done)
+        .where(Run.status == RunStatus.done, visible_clause(access_code_id))
         .order_by(Run.created_at.desc())
         .limit(5)
     )
@@ -81,13 +86,18 @@ async def _fetch_recent_runs_context(db: AsyncSession) -> str:
     return "\n".join(lines)
 
 
-async def diagnose(question: str, db: AsyncSession | None = None) -> str:
+async def diagnose(
+    question: str,
+    db: AsyncSession | None = None,
+    access_code_id: uuid.UUID | None = None,
+) -> str:
     """
     Produce a root cause diagnosis for the given question.
 
     If *db* is provided, the 5 most recent completed runs are fetched from
     Postgres and injected as "Recent runs" context alongside the semantically
-    similar runs retrieved from Azure AI Search.
+    similar runs retrieved from Azure AI Search. Both sources are limited to
+    the caller's own runs plus demo runs (access_code_id).
     """
     credential = AzureKeyCredential(settings.azure_search_key)
 
@@ -120,6 +130,7 @@ async def diagnose(question: str, db: AsyncSession | None = None) -> str:
             embedding_field_key="content_vector",
             metadata_string_field_key="metadata",
             doc_id_field_key="doc_id",
+            filterable_metadata_field_keys=["access_code_id"],
         )
 
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
@@ -130,7 +141,14 @@ async def diagnose(question: str, db: AsyncSession | None = None) -> str:
 
         # similarity_top_k=5 retrieves the 5 most relevant run summaries.
         # More context improves diagnosis quality; 5 keeps the prompt compact.
-        retriever = index.as_retriever(similarity_top_k=5)
+        # The owner filter is applied by Azure inside the vector query, so the
+        # top-k is chosen among the caller's visible documents. Post-filtering
+        # the top-k would return nothing whenever other owners' runs out-rank
+        # the caller's.
+        retriever = index.as_retriever(
+            similarity_top_k=5,
+            vector_store_kwargs={"odata_filter": search_filter(access_code_id)},
+        )
 
         logger.info("Retrieving semantic context for question: %s", question)
         nodes = retriever.retrieve(question)
@@ -140,7 +158,7 @@ async def diagnose(question: str, db: AsyncSession | None = None) -> str:
         # Fetch recent runs from Postgres when a session is available.
         if db is not None:
             logger.info("Fetching recent runs from Postgres for RCA context")
-            recent_context = await _fetch_recent_runs_context(db)
+            recent_context = await _fetch_recent_runs_context(db, access_code_id)
         else:
             recent_context = "(Database session not provided — recent runs unavailable.)"
 

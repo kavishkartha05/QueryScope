@@ -26,6 +26,7 @@ async def index_run(
     throughput: float,
     error_rate: float,
     created_at: datetime,
+    access_code_id: str = "demo",
 ) -> None:
     """
     Embed a plain-text run summary and persist it to Azure AI Search.
@@ -48,9 +49,12 @@ async def index_run(
 
     # Store run_id in metadata so the RCA chain can look up the full DB row
     # after retrieval without embedding that data in the document text.
+    # access_code_id is the owner ("demo" or a code UUID). It is also a
+    # filterable index field (see filterable_metadata_field_keys below) so
+    # diagnose can restrict retrieval to own-or-demo runs inside the query.
     doc = Document(
         text=summary,
-        metadata={"run_id": str(run_id)},
+        metadata={"run_id": str(run_id), "access_code_id": access_code_id},
     )
 
     # Configure the embedding model globally for this LlamaIndex call.
@@ -90,6 +94,7 @@ async def index_run(
             embedding_field_key="content_vector",
             metadata_string_field_key="metadata",
             doc_id_field_key="doc_id",
+            filterable_metadata_field_keys=["access_code_id"],
         )
 
         logger.info("Indexing run %s to Azure AI Search", run_id)

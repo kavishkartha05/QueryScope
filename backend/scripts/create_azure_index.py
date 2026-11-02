@@ -67,6 +67,15 @@ def main() -> None:
             retrievable=True,
             filterable=True,
         ),
+        # Owner of the run ("demo" or an access code UUID). Filterable so the
+        # diagnose query can restrict retrieval to own-or-demo documents.
+        # Adding a field to an existing index is allowed by create_or_update.
+        SimpleField(
+            name="access_code_id",
+            type=SearchFieldDataType.String,
+            retrievable=True,
+            filterable=True,
+        ),
     ]
 
     # HNSW (Hierarchical Navigable Small World) is Azure AI Search's default
