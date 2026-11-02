@@ -22,16 +22,20 @@ interface ChartRow {
 }
 
 export default function LatencyChart({ runs }: LatencyChartProps) {
-  const data: ChartRow[] = runs
-    .filter((r) => r.status === "done" && r.metrics != null)
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    .map((r) => ({
+  const finished: Run[] = [];
+  for (const r of runs) {
+    if (r.status === "done" && r.metrics != null) finished.push(r);
+  }
+  finished.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  const data: ChartRow[] = [];
+  for (const r of finished) {
+    data.push({
       id: r.id.slice(0, 8),
-      // Non-null assertion safe: filter above guarantees metrics exists.
       p50: r.metrics!.p50,
       p95: r.metrics!.p95,
       p99: r.metrics!.p99,
-    }));
+    });
+  }
 
   const heading = (
     <h2
