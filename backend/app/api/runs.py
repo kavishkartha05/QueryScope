@@ -25,6 +25,7 @@ from app.schemas.run import (
 )
 from app.services.aggregator import compute_metrics
 from app.services.indexer import index_run
+from app.services.quotas import QuotaExceeded, admission_lock, check_quotas
 from app.services.runner import run_benchmark, run_llm_benchmark
 from app.services.ssrf import TargetRejected, validate_target
 from app.services.scope import (
@@ -210,20 +211,32 @@ async def create_benchmark(
     except TargetRejected as rejected:
         raise HTTPException(status_code=422, detail=str(rejected))
 
-    run = Run(
-        target_url=str(req.target_url),
-        method=req.method.upper(),
-        num_requests=req.num_requests,
-        concurrency=req.concurrency,
-        # Tag the run with the creating code so usage can be attributed.
-        access_code_id=principal.code_id,
-    )
-    db.add(run)
-    # Flush to get the DB-assigned id without committing the transaction;
-    # commit happens here so the row is visible to the background task's
-    # separate session before that task starts.
-    await db.commit()
-    await db.refresh(run)
+    # Check the limits and insert the run under one lock, so two simultaneous
+    # requests cannot both pass the same check.
+    async with admission_lock():
+        try:
+            await check_quotas(db, principal.code_id, req.num_requests)
+        except QuotaExceeded as exceeded:
+            raise HTTPException(
+                status_code=429,
+                detail=str(exceeded),
+                headers={"Retry-After": str(exceeded.retry_after_s)},
+            )
+
+        run = Run(
+            target_url=str(req.target_url),
+            method=req.method.upper(),
+            num_requests=req.num_requests,
+            concurrency=req.concurrency,
+            # Tag the run with the creating code so usage can be attributed.
+            access_code_id=principal.code_id,
+        )
+        db.add(run)
+        # Flush to get the DB-assigned id without committing the transaction;
+        # commit happens here so the row is visible to the background task's
+        # separate session before that task starts.
+        await db.commit()
+        await db.refresh(run)
 
     # BackgroundTasks runs after the response is sent but inside the same
     # process — no broker needed for week-1 simplicity (see CLAUDE.md).

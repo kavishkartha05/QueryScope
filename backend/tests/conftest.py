@@ -128,16 +128,19 @@ async def make_run(
     p50: float = 100.0,
     baseline: bool = False,
     age_minutes: int = 0,
+    status: RunStatus = RunStatus.done,
+    num_requests: int = 10,
+    created_at: datetime | None = None,
 ) -> uuid.UUID:
     run = Run(
         target_url="https://httpbin.org/get",
         method="GET",
-        num_requests=10,
+        num_requests=num_requests,
         concurrency=2,
-        status=RunStatus.done,
+        status=status,
         is_baseline=baseline,
         access_code_id=owner,
-        created_at=datetime.now(timezone.utc) - timedelta(minutes=age_minutes),
+        created_at=created_at or (datetime.now(timezone.utc) - timedelta(minutes=age_minutes)),
     )
     async with AsyncSessionLocal() as session:
         session.add(run)
