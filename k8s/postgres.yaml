@@ -16,7 +16,7 @@ metadata:
   name: postgres
   namespace: queryscope
 spec:
-  replicas: 1   # stateful service — never run more than one replica without a StatefulSet
+  replicas: 1   # stateful service, never run more than one replica without a StatefulSet
   selector:
     matchLabels:
       app: postgres

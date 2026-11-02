@@ -1,7 +1,7 @@
 {
   "name": "queryscope-cli",
   "version": "1.0.0",
-  "description": "CLI for QueryScope — one-command setup and management",
+  "description": "CLI for QueryScope, one-command setup and management",
   "type": "module",
   "bin": {
     "queryscope": "./bin/queryscope.js"

@@ -79,7 +79,7 @@ def main() -> None:
     ]
 
     # HNSW (Hierarchical Navigable Small World) is Azure AI Search's default
-    # ANN algorithm — good recall/latency trade-off for our embedding size.
+    # ANN algorithm, good recall/latency trade-off for our embedding size.
     vector_search = VectorSearch(
         algorithms=[HnswAlgorithmConfiguration(name="hnsw-config")],
         profiles=[

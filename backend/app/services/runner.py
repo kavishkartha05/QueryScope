@@ -35,7 +35,7 @@ async def run_benchmark(
     # Lock guards appends to the shared lists from concurrent tasks.
     lock = asyncio.Lock()
 
-    # A single client is reused across all tasks — connection pooling is
+    # A single client is reused across all tasks, connection pooling is
     # handled internally by httpx and is much cheaper than creating a client
     # per request. The client never follows redirects and ignores proxy env vars.
     async with build_pinned_client(
@@ -109,7 +109,7 @@ async def run_llm_benchmark(
         ttft_latencies:        ms from request send to first streamed chunk
         total_latencies:       ms from request send to last chunk
         tokens_per_second_list: chunks/sec per request (chunk count is a proxy
-                                for tokens — actual tokenisation isn't available
+                                for tokens, actual tokenisation isn't available
                                 without a tokeniser; chunk count is close enough
                                 for relative comparisons between runs)
         error_count:           requests that failed or returned non-2xx

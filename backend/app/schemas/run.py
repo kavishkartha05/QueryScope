@@ -47,7 +47,7 @@ class BenchmarkRequest(_Capped):
     timeout_s: float | None = Field(default=None, gt=0)
     headers: dict[str, str] | None = None
     body: dict | None = None
-    # SLA thresholds — all optional.  Omit a field to skip that threshold.
+    # SLA thresholds, all optional.  Omit a field to skip that threshold.
     sla_p50_ms: float | None = Field(default=None, gt=0)
     sla_p95_ms: float | None = Field(default=None, gt=0)
     sla_p99_ms: float | None = Field(default=None, gt=0)
@@ -109,7 +109,7 @@ class SlaResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 class MetricsSummary(BaseModel):
-    """Aggregates only — used when embedding metrics inside a Run response."""
+    """Aggregates only, used when embedding metrics inside a Run response."""
     p50: float
     p95: float
     p99: float
@@ -149,7 +149,7 @@ class RunResponse(BaseModel):
     delta_p99_pct: float | None = None
     delta_avg_latency_pct: float | None = None
     delta_error_rate_pct: float | None = None
-    # SLA config and result — absent when no thresholds were configured.
+    # SLA config and result, absent when no thresholds were configured.
     sla_config: SlaConfig | None = None
     sla_result: SlaResult | None = None
 

@@ -107,7 +107,7 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             )
             session.add(metrics)
 
-            # SLA evaluation — only when at least one threshold was provided.
+            # SLA evaluation, only when at least one threshold was provided.
             has_sla = any([
                 req.sla_p50_ms is not None,
                 req.sla_p95_ms is not None,
@@ -239,7 +239,7 @@ async def create_benchmark(
         await db.refresh(run)
 
     # BackgroundTasks runs after the response is sent but inside the same
-    # process — no broker needed for week-1 simplicity (see CLAUDE.md).
+    # process, no broker needed for week-1 simplicity (see CLAUDE.md).
     background_tasks.add_task(_execute_and_persist, run.id, req)
 
     return RunCreatedResponse(run_id=run.id)
@@ -281,7 +281,7 @@ async def list_runs(
 
 
 # ---------------------------------------------------------------------------
-# GET /runs/baseline  — must be defined before /runs/{run_id} so that the
+# GET /runs/baseline , must be defined before /runs/{run_id} so that the
 # static path segment "baseline" is matched first.
 # ---------------------------------------------------------------------------
 
@@ -294,7 +294,7 @@ async def get_baseline_run(db: DB, principal: CurrentPrincipal) -> RunResponse:
 
 
 # ---------------------------------------------------------------------------
-# DELETE /runs/baseline  — clear the caller's own baseline. Afterwards the
+# DELETE /runs/baseline , clear the caller's own baseline. Afterwards the
 # demo baseline (if any) applies again. Callers never touch the demo baseline.
 # ---------------------------------------------------------------------------
 
@@ -359,7 +359,7 @@ async def get_run_metrics(
     if metrics is None:
         raise HTTPException(
             status_code=404,
-            detail="Metrics not found — run may still be in progress",
+            detail="Metrics not found, run may still be in progress",
         )
     return MetricsDetail.model_validate(metrics)
 
@@ -371,7 +371,7 @@ async def get_run_metrics(
 async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
     """
     Background task for LLM benchmarking. Results are logged rather than
-    persisted to the Metrics table — LLM metrics (TTFT, tokens/sec) have a
+    persisted to the Metrics table, LLM metrics (TTFT, tokens/sec) have a
     different shape from REST latencies and don't fit the existing schema.
     Persistence can be added in a follow-up once the schema is extended.
     """
@@ -442,7 +442,7 @@ async def create_llm_benchmark(
     except TargetRejected as rejected:
         raise HTTPException(status_code=422, detail=str(rejected))
 
-    # Generate a client-visible run_id without a DB row — LLM runs aren't
+    # Generate a client-visible run_id without a DB row, LLM runs aren't
     # persisted to the runs table yet. The id still lets callers correlate
     # log lines with the request that triggered them.
     import uuid as _uuid
@@ -510,7 +510,7 @@ async def diagnose_run(
     req: DiagnoseRequest, db: DB, principal: CurrentPrincipal
 ) -> DiagnoseResponse:
     # Local import keeps rca.py's heavy LangChain/LlamaIndex imports from
-    # loading at startup — they're only needed when this endpoint is hit.
+    # loading at startup, they're only needed when this endpoint is hit.
     from app.services.rca import diagnose
 
     result = await diagnose(req.question, db=db, access_code_id=principal.code_id)

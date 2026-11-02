@@ -84,7 +84,7 @@ async def index_run(
 
     try:
         # AzureAISearchVectorStore is the only vector store in this project
-        # (see CLAUDE.md — no alternatives). IndexManagement.VALIDATE_INDEX
+        # (see CLAUDE.md, no alternatives). IndexManagement.VALIDATE_INDEX
         # asserts the index exists rather than trying to create it at runtime,
         # which keeps IAM requirements minimal (no index-write permissions needed).
         vector_store = AzureAISearchVectorStore(
@@ -105,7 +105,7 @@ async def index_run(
         # from_documents embeds the document and upserts it into the vector store
         # in one call. We don't need a persistent StorageContext on disk because
         # Azure AI Search is the durable store.
-        # afrom_documents does not exist in llama-index-core 0.14.x — sync only.
+        # afrom_documents does not exist in llama-index-core 0.14.x, sync only.
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         VectorStoreIndex.from_documents(
             [doc],

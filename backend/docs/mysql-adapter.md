@@ -15,7 +15,7 @@ how to point QueryScope at MySQL instead of PostgreSQL.
    DATABASE_URL=mysql+aiomysql://user:password@host:3306/queryscope
    ```
 
-   A bare `mysql://` URL also works — `app/core/db.py` rewrites it to
+   A bare `mysql://` URL also works, `app/core/db.py` rewrites it to
    `mysql+aiomysql://` automatically.
 
 2. Run migrations:
@@ -59,8 +59,8 @@ automatically, and numpy can operate on that list directly.
 The `run_status` enum uses `sa.Enum` with `create_type=True`.  Alembic detects
 the dialect at migration time:
 
-- **PostgreSQL** — emits `CREATE TYPE run_status AS ENUM (...)` before the table.
-- **MySQL** — emits `ENUM('pending','running','done','failed')` inline on the
+- **PostgreSQL**, emits `CREATE TYPE run_status AS ENUM (...)` before the table.
+- **MySQL**, emits `ENUM('pending','running','done','failed')` inline on the
   column, with no separate type object.
 
 No manual changes are needed when switching dialects.
@@ -74,9 +74,9 @@ No manual changes are needed when switching dialects.
 
 ## Remaining limitations
 
-- **Azure AI Search / OpenAI** — these depend on external services, not the
+- **Azure AI Search / OpenAI**, these depend on external services, not the
   database, and are unaffected by the adapter swap.
-- **UUID primary keys** — MySQL 5.7 stores UUIDs as `CHAR(32)`; MySQL 8+ and
+- **UUID primary keys**, MySQL 5.7 stores UUIDs as `CHAR(32)`; MySQL 8+ and
   MariaDB support native `UUID`.  SQLAlchemy's `Uuid` type handles this
   transparently, but query performance on large tables may differ from
   PostgreSQL's native `uuid` type.

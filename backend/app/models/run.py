@@ -96,14 +96,14 @@ class Metrics(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         # ondelete="CASCADE" is the DB-level guard; the ORM cascade above
-        # handles Python-side deletes — both are needed for safety.
+        # handles Python-side deletes, both are needed for safety.
         ForeignKey("runs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
 
     # JSON is used instead of PostgreSQL's native ARRAY so the schema works on
-    # both Postgres and MySQL (adapter swap demo — see docs/mysql-adapter.md).
+    # both Postgres and MySQL (adapter swap demo, see docs/mysql-adapter.md).
     # SQLAlchemy serialises list[float] to/from JSON automatically; numpy can
     # still operate on the deserialized Python list directly.
     latencies: Mapped[list[float]] = mapped_column(
@@ -118,7 +118,7 @@ class Metrics(Base):
 
     # requests / total_wall_time_seconds
     throughput: Mapped[float] = mapped_column(Float, nullable=False)
-    # error_count / num_requests — stored as 0.0–1.0 fraction
+    # error_count / num_requests, stored as 0.0–1.0 fraction
     error_rate: Mapped[float] = mapped_column(Float, nullable=False)
 
     run: Mapped["Run"] = relationship("Run", back_populates="metrics")
