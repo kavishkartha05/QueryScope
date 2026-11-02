@@ -22,18 +22,20 @@ export interface Run {
   concurrency: number;
   status: RunStatus;
   is_baseline: boolean;
+  // True for shared example runs the caller cannot modify.
+  is_demo?: boolean;
   created_at: string;
   // Absent (undefined) when the run has not completed yet.
   // response_model_exclude_none=True on the list endpoint omits the field
   // rather than returning null, so we use optional here.
   metrics?: MetricsSummary | null;
-  // Delta fields — only present on non-baseline runs when a baseline is pinned.
+  // Delta fields, only present on non-baseline runs when a baseline is pinned.
   delta_p50_pct?: number;
   delta_p95_pct?: number;
   delta_p99_pct?: number;
   delta_avg_latency_pct?: number;
   delta_error_rate_pct?: number;
-  // SLA — absent when no thresholds were configured for the run.
+  // SLA, absent when no thresholds were configured for the run.
   sla_config?: SlaConfig;
   sla_result?: SlaResult;
 }
@@ -71,6 +73,7 @@ export interface BenchmarkRequest {
   method: string;
   num_requests: number;
   concurrency: number;
+  timeout_s?: number;
   headers?: Record<string, string>;
   body?: Record<string, unknown>;
   sla_p50_ms?: number;

@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import client from "../api/client";
+import { describeError } from "../api/errors";
+import { clampInt } from "../lib/numbers";
+import type { AppConfig } from "../types/config";
 import type { BenchmarkRequest, RunCreatedResponse } from "../types/run";
 
 interface BenchmarkFormProps {
+  config: AppConfig;
   onRunCreated: (runId: string) => void;
-  // Incrementing this value triggers a reset of the SLA fields so they don't
-  // carry over into the next benchmark after a session reset.
-  resetKey?: number;
 }
+
+const CUSTOM = "__custom__";
+
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE"] as const;
 type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -26,6 +30,13 @@ const baseInput: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+const hintStyle: React.CSSProperties = {
+  margin: "6px 0 0",
+  fontSize: 12,
+  color: "#8892b0",
+  lineHeight: 1.5,
+};
+
 const labelStyle: React.CSSProperties = {
   display: "block",
   fontSize: 11,
@@ -36,11 +47,16 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
-export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormProps) {
-  const [targetUrl, setTargetUrl] = useState("");
+export default function BenchmarkForm({ config, onRunCreated }: BenchmarkFormProps) {
+  const { caps } = config;
+  // Picker value: a target URL from the allowlist, or CUSTOM (local use only).
+  const firstTarget = config.targets.length > 0 ? config.targets[0].url : CUSTOM;
+  const [targetChoice, setTargetChoice] = useState(firstTarget);
+  const [customUrl, setCustomUrl] = useState("");
   const [method, setMethod] = useState<HttpMethod>("GET");
-  const [numRequests, setNumRequests] = useState(50);
-  const [concurrency, setConcurrency] = useState(5);
+  const [numRequests, setNumRequests] = useState(Math.min(50, caps.max_num_requests));
+  const [concurrency, setConcurrency] = useState(Math.min(5, caps.max_concurrency));
+  const [timeoutS, setTimeoutS] = useState(Math.min(5, caps.max_request_timeout_s));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
@@ -54,17 +70,30 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
   const [slaAvg, setSlaAvg] = useState("");
   const [slaErr, setSlaErr] = useState("");
 
-  // Clear SLA fields and collapse the section whenever the parent resets the
-  // session. resetKey starts at 0, so the effect is skipped on first render.
-  useEffect(() => {
-    if (!resetKey) return;
-    setSlaP50("");
-    setSlaP95("");
-    setSlaP99("");
-    setSlaAvg("");
-    setSlaErr("");
-    setSlaOpen(false);
-  }, [resetKey]);
+  const targetOptions: React.ReactNode[] = [];
+  for (const t of config.targets) {
+    targetOptions.push(
+      <option key={t.url} value={t.url}>
+        {t.label}
+      </option>,
+    );
+  }
+  if (config.allow_custom_target) {
+    targetOptions.push(
+      <option key={CUSTOM} value={CUSTOM}>
+        Custom URL
+      </option>,
+    );
+  }
+
+  const methodOptions: React.ReactNode[] = [];
+  for (const m of HTTP_METHODS) {
+    methodOptions.push(
+      <option key={m} value={m}>
+        {m}
+      </option>,
+    );
+  }
 
   function inputStyle(name: string): React.CSSProperties {
     return {
@@ -86,10 +115,11 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
     setSubmitting(true);
 
     const payload: BenchmarkRequest = {
-      target_url: targetUrl,
+      target_url: targetChoice === CUSTOM ? customUrl : targetChoice,
       method,
       num_requests: numRequests,
       concurrency,
+      timeout_s: timeoutS,
     };
 
     // Only include SLA fields that the user actually filled in.
@@ -109,7 +139,7 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
       setSuccessId(res.data.run_id);
       onRunCreated(res.data.run_id);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      setError(describeError(err));
     } finally {
       setSubmitting(false);
     }
@@ -130,82 +160,78 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
         New Benchmark
       </h2>
 
-      {/* Row 1: URL + Method */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 130px",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
+      {/* Row 1: Target + Method */}
+      <div className="qs-grid-url" style={{ marginBottom: 12 }}>
         <div>
-          <label style={labelStyle}>Target URL</label>
-          <input
-            type="text"
-            value={targetUrl}
-            onChange={(e) => setTargetUrl(e.target.value)}
+          <label htmlFor="bf-target" style={labelStyle}>Target</label>
+          <select
+            id="bf-target"
+            value={targetChoice}
+            onChange={(e) => setTargetChoice(e.target.value)}
             onFocus={() => setFocused("url")}
             onBlur={() => setFocused(null)}
-            placeholder="https://api.example.com/endpoint"
-            required
-            style={inputStyle("url")}
-          />
+            style={{ ...inputStyle("url"), cursor: "pointer" }}
+          >
+            {targetOptions}
+          </select>
+          {targetChoice === CUSTOM && (
+            <input
+              type="url"
+              aria-label="Custom target URL"
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              placeholder="https://api.example.com/endpoint"
+              required
+              style={{ ...inputStyle("custom"), marginTop: 8 }}
+            />
+          )}
+          {!config.allow_custom_target && (
+            <p style={hintStyle}>
+              This demo only allows the targets listed here, so nothing private is ever called.
+            </p>
+          )}
         </div>
         <div>
-          <label style={labelStyle}>Method</label>
+          <label htmlFor="bf-method" style={labelStyle}>Method</label>
           <select
+            id="bf-method"
             value={method}
             onChange={(e) => setMethod(e.target.value as HttpMethod)}
             onFocus={() => setFocused("method")}
             onBlur={() => setFocused(null)}
-            style={{
-              ...inputStyle("method"),
-              cursor: "pointer",
-              appearance: "none",
-            }}
+            style={{ ...inputStyle("method"), cursor: "pointer" }}
           >
-            {HTTP_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
+            {methodOptions}
           </select>
         </div>
       </div>
 
-      {/* Row 2: Requests + Concurrency */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
+      {/* Row 2: Requests + Concurrency + Timeout, all inside the server caps */}
+      <div className="qs-grid-3" style={{ marginBottom: 6 }}>
         <div>
-          <label style={labelStyle}>Requests</label>
+          <label htmlFor="bf-reqs" style={labelStyle}>Requests (max {caps.max_num_requests})</label>
           <input
+            id="bf-reqs"
             type="number"
+            inputMode="numeric"
             min={1}
-            max={10000}
+            max={caps.max_num_requests}
             value={numRequests}
-            onChange={(e) => setNumRequests(Number(e.target.value))}
+            onChange={(e) => setNumRequests(clampInt(e.target.value, 1, caps.max_num_requests))}
             onFocus={() => setFocused("reqs")}
             onBlur={() => setFocused(null)}
             style={inputStyle("reqs")}
           />
         </div>
         <div>
-          <label style={labelStyle}>
-            Concurrency
+          <label htmlFor="bf-conc" style={labelStyle}>
+            Concurrency (max {caps.max_concurrency})
             <span
+              aria-hidden
               style={{
                 marginLeft: 8,
                 color: "#7c3aed",
                 fontSize: 12,
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
                 textTransform: "none",
                 letterSpacing: 0,
               }}
@@ -214,20 +240,43 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
             </span>
           </label>
           <input
+            id="bf-conc"
             type="range"
             min={1}
-            max={20}
+            max={caps.max_concurrency}
             value={concurrency}
-            onChange={(e) => setConcurrency(Number(e.target.value))}
+            onChange={(e) => setConcurrency(clampInt(e.target.value, 1, caps.max_concurrency))}
+            aria-valuetext={`${concurrency} at a time`}
             style={{ width: "100%", accentColor: "#7c3aed", cursor: "pointer" }}
           />
         </div>
+        <div>
+          <label htmlFor="bf-timeout" style={labelStyle}>Timeout s (max {caps.max_request_timeout_s})</label>
+          <input
+            id="bf-timeout"
+            type="number"
+            inputMode="decimal"
+            min={1}
+            max={caps.max_request_timeout_s}
+            step={1}
+            value={timeoutS}
+            onChange={(e) => setTimeoutS(clampInt(e.target.value, 1, caps.max_request_timeout_s))}
+            onFocus={() => setFocused("timeout")}
+            onBlur={() => setFocused(null)}
+            style={inputStyle("timeout")}
+          />
+        </div>
       </div>
+      <p style={{ ...hintStyle, marginBottom: 20 }}>
+        Limits: up to {caps.max_num_requests} requests, {caps.max_concurrency} at a time, each run
+        stops after {caps.run_wall_clock_limit_s} s.
+      </p>
 
-      {/* SLA Thresholds — collapsible */}
+      {/* SLA Thresholds, collapsible */}
       <div style={{ marginBottom: 20 }}>
         <button
           type="button"
+          aria-expanded={slaOpen}
           onClick={() => setSlaOpen((o) => !o)}
           style={{
             display: "flex",
@@ -304,16 +353,13 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
               if any configured threshold is exceeded.
             </p>
             <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 12,
-                marginBottom: 12,
-              }}
+              className="qs-grid-3"
+              style={{ marginBottom: 12 }}
             >
               <div>
-                <label style={labelStyle}>P50 (ms)</label>
+                <label htmlFor="bf-slaP50" style={labelStyle}>P50 (ms)</label>
                 <input
+                  id="bf-slaP50"
                   type="number"
                   min={0}
                   step="any"
@@ -326,8 +372,9 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
                 />
               </div>
               <div>
-                <label style={labelStyle}>P95 (ms)</label>
+                <label htmlFor="bf-slaP95" style={labelStyle}>P95 (ms)</label>
                 <input
+                  id="bf-slaP95"
                   type="number"
                   min={0}
                   step="any"
@@ -340,8 +387,9 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
                 />
               </div>
               <div>
-                <label style={labelStyle}>P99 (ms)</label>
+                <label htmlFor="bf-slaP99" style={labelStyle}>P99 (ms)</label>
                 <input
+                  id="bf-slaP99"
                   type="number"
                   min={0}
                   step="any"
@@ -355,15 +403,12 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
               </div>
             </div>
             <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 12,
-              }}
+              className="qs-grid-2"
             >
               <div>
-                <label style={labelStyle}>Avg Latency (ms)</label>
+                <label htmlFor="bf-slaAvg" style={labelStyle}>Avg Latency (ms)</label>
                 <input
+                  id="bf-slaAvg"
                   type="number"
                   min={0}
                   step="any"
@@ -376,8 +421,9 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
                 />
               </div>
               <div>
-                <label style={labelStyle}>Error Rate (%)</label>
+                <label htmlFor="bf-slaErr" style={labelStyle}>Error Rate (%)</label>
                 <input
+                  id="bf-slaErr"
                   type="number"
                   min={0}
                   max={100}
@@ -397,6 +443,7 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
 
       {error && (
         <div
+          role="alert"
           style={{
             marginBottom: 14,
             padding: "9px 14px",
@@ -413,6 +460,7 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
 
       {successId && (
         <div
+          role="status"
           style={{
             marginBottom: 14,
             padding: "9px 14px",
@@ -425,7 +473,7 @@ export default function BenchmarkForm({ onRunCreated, resetKey }: BenchmarkFormP
               "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
           }}
         >
-          Started — run_id: {successId}
+          Started. Run {successId.slice(0, 8)} is queued; watch it below.
         </div>
       )}
 
