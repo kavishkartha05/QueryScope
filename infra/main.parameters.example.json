@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": { "value": "qscope" },
+    "location": { "value": "eastus2" },
+    "staticWebAppLocation": { "value": "eastus2" },
+    "deployApps": { "value": false },
+    "backendImage": { "value": "" },
+    "demoTargetImage": { "value": "" },
+    "postgresSkuName": { "value": "Standard_B1ms" },
+    "azureSearchEndpoint": { "value": "https://REPLACE-ME.search.windows.net" },
+    "azureSearchIndex": { "value": "benchmark-runs-prod" },
+    "extraAllowedHosts": { "value": "httpbin.org" },
+    "trustedProxyHops": { "value": 1 },
+    "alertEmail": { "value": "you@example.com" },
+    "monthlyBudget": { "value": 25 }
+  }
+}
