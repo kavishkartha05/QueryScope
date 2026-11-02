@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from typing import Annotated
@@ -74,15 +75,20 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             # ones the connections are pinned to.
             target = await validate_target(str(req.target_url))
 
-            result = await run_benchmark(
-                target_url=str(req.target_url),
-                method=req.method,
-                num_requests=req.num_requests,
-                concurrency=req.concurrency,
-                pins={target.host: target.addresses},
-                timeout_s=settings.max_request_timeout_s,
-                headers=req.headers,
-                body=req.body,
+            # Hard wall-clock limit for the whole run: wait_for cancels the
+            # engine (and its client) if the run is still going when it expires.
+            result = await asyncio.wait_for(
+                run_benchmark(
+                    target_url=str(req.target_url),
+                    method=req.method,
+                    num_requests=req.num_requests,
+                    concurrency=req.concurrency,
+                    pins={target.host: target.addresses},
+                    timeout_s=_request_timeout(req),
+                    headers=req.headers,
+                    body=req.body,
+                ),
+                timeout=settings.run_wall_clock_limit_s,
             )
 
             latencies = result["latencies"]
@@ -164,6 +170,15 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             except Exception as exc:
                 logger.warning("Indexing failed for run %s: %s", run.id, exc)
             logger.info("Indexing block completed for run %s", run_id)
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Run %s exceeded the %gs wall-clock limit and was cancelled",
+                run_id,
+                settings.run_wall_clock_limit_s,
+            )
+            run.status = RunStatus.failed
+            await session.commit()
 
         except TargetRejected as rejected:
             # The target passed the check at request time but not now (for
@@ -431,6 +446,13 @@ async def diagnose_run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _request_timeout(req) -> float:
+    """Per-request timeout: the caller's value (already capped) or the server maximum."""
+    if req.timeout_s is not None:
+        return req.timeout_s
+    return settings.max_request_timeout_s
+
 
 def _pct_delta(current: float, baseline: float) -> float:
     """Return percentage change of current vs baseline (positive = regression).
