@@ -276,7 +276,7 @@ async def list_runs(
 
     items = []
     for r in runs:
-        items.append(_run_to_response(r, baseline=baseline))
+        items.append(_run_to_response(r, baseline=baseline, caller_id=principal.code_id))
     return PaginatedRuns(total=total, offset=offset, limit=limit, items=items)
 
 
@@ -290,7 +290,7 @@ async def get_baseline_run(db: DB, principal: CurrentPrincipal) -> RunResponse:
     baseline = await effective_baseline(db, principal.code_id)
     if baseline is None:
         raise HTTPException(status_code=404, detail="No baseline run is set")
-    return _run_to_response(baseline, baseline=baseline)
+    return _run_to_response(baseline, baseline=baseline, caller_id=principal.code_id)
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +309,7 @@ async def set_baseline(
         raise HTTPException(status_code=400, detail="Run is already the baseline")
 
     await _replace_baseline(db, run, owned_clause(principal.code_id))
-    return _run_to_response(run, baseline=run)
+    return _run_to_response(run, baseline=run, caller_id=principal.code_id)
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ async def set_baseline(
 async def get_run(run_id: uuid.UUID, db: DB, principal: CurrentPrincipal) -> RunResponse:
     run = await _get_visible_run(db, run_id, principal)
     baseline = await effective_baseline(db, principal.code_id)
-    return _run_to_response(run, baseline=baseline)
+    return _run_to_response(run, baseline=baseline, caller_id=principal.code_id)
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +550,9 @@ async def _replace_baseline(db: AsyncSession, run: Run, owner_scope) -> None:
     await db.refresh(run)
 
 
-def _run_to_response(run: Run, baseline: "Run | None" = None) -> RunResponse:
+def _run_to_response(
+    run: Run, baseline: "Run | None" = None, caller_id: uuid.UUID | None = None
+) -> RunResponse:
     """
     Map ORM Run → RunResponse.
 
@@ -607,6 +609,9 @@ def _run_to_response(run: Run, baseline: "Run | None" = None) -> RunResponse:
         concurrency=run.concurrency,
         status=run.status,
         is_baseline=is_baseline,
+        # Not owned by the caller. With auth off the caller is the demo owner,
+        # so nothing is read-only locally.
+        is_demo=run.access_code_id != caller_id,
         created_at=run.created_at,
         metrics=metrics_summary,
         delta_p50_pct=delta_p50_pct,

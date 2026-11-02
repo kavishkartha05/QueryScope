@@ -136,6 +136,8 @@ class RunResponse(BaseModel):
     concurrency: int
     status: RunStatus
     is_baseline: bool = False
+    # True for runs the caller cannot modify (shared demo runs). Read-only.
+    is_demo: bool = False
     created_at: datetime
     # None until the background task finishes persisting results.
     metrics: MetricsSummary | None = None
