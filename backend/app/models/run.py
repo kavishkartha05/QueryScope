@@ -53,7 +53,16 @@ class Run(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    # At most one row has is_baseline=True at any time — enforced in the API
+    # Owner of the run: the access code that created it, or NULL for the shared
+    # demo owner (seeded demo runs, and local runs when auth is disabled).
+    # No ondelete action: codes are revoked, never deleted.
+    access_code_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("access_codes.id"),
+        nullable=True,
+        index=True,
+    )
+    # At most one row PER OWNER has is_baseline=True, enforced in the API
     # layer rather than via a partial unique index so it works on both
     # Postgres and MySQL (the adapter swap demo target).
     is_baseline: Mapped[bool] = mapped_column(
