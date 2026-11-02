@@ -3,9 +3,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import AdminOnly, CurrentPrincipal, get_principal
+from app.core.config import settings
 from app.core.db import get_db
 from app.models.run import Metrics, Run, RunStatus
 from app.schemas.run import (
@@ -23,10 +25,20 @@ from app.schemas.run import (
 from app.services.aggregator import compute_metrics
 from app.services.indexer import index_run
 from app.services.runner import run_benchmark, run_llm_benchmark
+from app.services.scope import (
+    effective_baseline,
+    index_owner_value,
+    owned_clause,
+    visible_clause,
+)
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/benchmark", tags=["runs"])
+# Every route here requires a valid session (get_principal); individual routes
+# also take the principal to scope their queries to the caller's own runs.
+router = APIRouter(
+    prefix="/benchmark", tags=["runs"], dependencies=[Depends(get_principal)]
+)
 
 # Reusable dependency alias for brevity in signatures.
 DB = Annotated[AsyncSession, Depends(get_db)]
@@ -139,6 +151,7 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
                     throughput=metrics.throughput,
                     error_rate=metrics.error_rate,
                     created_at=run.created_at,
+                    access_code_id=index_owner_value(run.access_code_id),
                 )
             except Exception as exc:
                 logger.warning("Indexing failed for run %s: %s", run.id, exc)
@@ -159,12 +172,15 @@ async def create_benchmark(
     req: BenchmarkRequest,
     background_tasks: BackgroundTasks,
     db: DB,
+    principal: CurrentPrincipal,
 ) -> RunCreatedResponse:
     run = Run(
         target_url=str(req.target_url),
         method=req.method.upper(),
         num_requests=req.num_requests,
         concurrency=req.concurrency,
+        # Tag the run with the creating code so usage can be attributed.
+        access_code_id=principal.code_id,
     )
     db.add(run)
     # Flush to get the DB-assigned id without committing the transaction;
@@ -187,32 +203,32 @@ async def create_benchmark(
 @router.get("/runs", response_model=PaginatedRuns, response_model_exclude_none=True)
 async def list_runs(
     db: DB,
+    principal: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaginatedRuns:
-    total_result = await db.execute(select(func.count()).select_from(Run))
+    visible = visible_clause(principal.code_id)
+    total_result = await db.execute(select(func.count()).select_from(Run).where(visible))
     total = total_result.scalar_one()
 
     runs_result = await db.execute(
-        select(Run).order_by(Run.created_at.desc()).offset(offset).limit(limit)
+        select(Run)
+        .where(visible)
+        .order_by(Run.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     # unique() is required after selectin-loaded relationships to de-duplicate
     # the joined rows that SQLAlchemy emits internally.
     runs = runs_result.scalars().unique().all()
 
-    # Fetch the current baseline so deltas can be computed for every other run.
-    baseline_result = await db.execute(
-        select(Run).where(Run.is_baseline == True)  # noqa: E712
-    )
-    baseline = baseline_result.scalars().first()
-    baseline_metrics = baseline.metrics[0] if (baseline and baseline.metrics) else None
+    # The caller's own baseline, else the demo baseline, drives every delta.
+    baseline = await effective_baseline(db, principal.code_id)
 
-    return PaginatedRuns(
-        total=total,
-        offset=offset,
-        limit=limit,
-        items=[_run_to_response(r, baseline_metrics=baseline_metrics) for r in runs],
-    )
+    items = []
+    for r in runs:
+        items.append(_run_to_response(r, baseline=baseline))
+    return PaginatedRuns(total=total, offset=offset, limit=limit, items=items)
 
 
 # ---------------------------------------------------------------------------
@@ -221,14 +237,11 @@ async def list_runs(
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/baseline", response_model=RunResponse)
-async def get_baseline_run(db: DB) -> RunResponse:
-    result = await db.execute(
-        select(Run).where(Run.is_baseline == True)  # noqa: E712
-    )
-    baseline = result.scalars().first()
+async def get_baseline_run(db: DB, principal: CurrentPrincipal) -> RunResponse:
+    baseline = await effective_baseline(db, principal.code_id)
     if baseline is None:
         raise HTTPException(status_code=404, detail="No baseline run is set")
-    return _run_to_response(baseline)
+    return _run_to_response(baseline, baseline=baseline)
 
 
 # ---------------------------------------------------------------------------
@@ -236,27 +249,18 @@ async def get_baseline_run(db: DB) -> RunResponse:
 # ---------------------------------------------------------------------------
 
 @router.patch("/runs/{run_id}/baseline", response_model=RunResponse)
-async def set_baseline(run_id: uuid.UUID, db: DB) -> RunResponse:
-    run = await db.get(Run, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+async def set_baseline(
+    run_id: uuid.UUID, db: DB, principal: CurrentPrincipal
+) -> RunResponse:
+    run = await _get_visible_run(db, run_id, principal)
+    if run.access_code_id != principal.code_id:
+        # Visible but not owned: a demo run. Only admins change the demo baseline.
+        raise HTTPException(status_code=403, detail="Demo runs cannot be modified")
     if run.is_baseline:
         raise HTTPException(status_code=400, detail="Run is already the baseline")
 
-    # Clear any existing baseline before setting the new one — only one may
-    # exist at a time. Using a bulk UPDATE avoids a separate SELECT + loop.
-    # synchronize_session=False skips the in-memory cache update; the commit
-    # and refresh below make the session consistent again.
-    await db.execute(
-        update(Run)
-        .where(Run.is_baseline == True)  # noqa: E712
-        .values(is_baseline=False)
-        .execution_options(synchronize_session=False)
-    )
-    run.is_baseline = True
-    await db.commit()
-    await db.refresh(run)
-    return _run_to_response(run)
+    await _replace_baseline(db, run, owned_clause(principal.code_id))
+    return _run_to_response(run, baseline=run)
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +268,10 @@ async def set_baseline(run_id: uuid.UUID, db: DB) -> RunResponse:
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
-async def get_run(run_id: uuid.UUID, db: DB) -> RunResponse:
-    run = await db.get(Run, run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return _run_to_response(run)
+async def get_run(run_id: uuid.UUID, db: DB, principal: CurrentPrincipal) -> RunResponse:
+    run = await _get_visible_run(db, run_id, principal)
+    baseline = await effective_baseline(db, principal.code_id)
+    return _run_to_response(run, baseline=baseline)
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +279,11 @@ async def get_run(run_id: uuid.UUID, db: DB) -> RunResponse:
 # ---------------------------------------------------------------------------
 
 @router.get("/runs/{run_id}/metrics", response_model=MetricsDetail)
-async def get_run_metrics(run_id: uuid.UUID, db: DB) -> MetricsDetail:
+async def get_run_metrics(
+    run_id: uuid.UUID, db: DB, principal: CurrentPrincipal
+) -> MetricsDetail:
+    # 404 for runs the caller cannot see, same as a missing run.
+    await _get_visible_run(db, run_id, principal)
     result = await db.execute(
         select(Metrics).where(Metrics.run_id == run_id)
     )
@@ -357,13 +364,29 @@ async def create_llm_benchmark(
 # DELETE /benchmark/runs
 # ---------------------------------------------------------------------------
 
-@router.delete("/runs", status_code=200)
-async def reset_session(db: DB) -> dict[str, str]:
+# Same path as before (the CLI `reset` command uses it) but on its own router:
+# it is guarded by the admin key alone, not by a recruiter session token.
+admin_router = APIRouter(prefix="/benchmark", tags=["admin"], dependencies=[AdminOnly])
+
+
+@admin_router.delete("/runs", status_code=200)
+async def reset_session(
+    db: DB, include_demo: bool | None = None
+) -> dict[str, str]:
+    # Admin only. By default the hosted deployment keeps the seeded demo runs
+    # (access_code_id IS NULL); local use (auth disabled) has only NULL-owned
+    # runs, so there the default is to delete everything, as before.
+    if include_demo is None:
+        include_demo = not settings.auth_enabled
+
     # Bulk ORM delete: issues a single DELETE FROM runs to the DB.
     # The DB-level ondelete="CASCADE" on metrics.run_id handles removing
     # all child metrics rows — ORM-level cascade doesn't fire for bulk deletes,
     # so relying on the FK cascade here is intentional and correct.
-    await db.execute(delete(Run))
+    stmt = delete(Run)
+    if not include_demo:
+        stmt = stmt.where(Run.access_code_id.is_not(None))
+    await db.execute(stmt)
     await db.commit()
     return {"message": "Session reset successfully"}
 
@@ -373,12 +396,14 @@ async def reset_session(db: DB) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 @router.post("/diagnose", response_model=DiagnoseResponse)
-async def diagnose_run(req: DiagnoseRequest, db: DB) -> DiagnoseResponse:
+async def diagnose_run(
+    req: DiagnoseRequest, db: DB, principal: CurrentPrincipal
+) -> DiagnoseResponse:
     # Local import keeps rca.py's heavy LangChain/LlamaIndex imports from
     # loading at startup — they're only needed when this endpoint is hit.
     from app.services.rca import diagnose
 
-    result = await diagnose(req.question, db=db)
+    result = await diagnose(req.question, db=db, access_code_id=principal.code_id)
     return DiagnoseResponse(diagnosis=result)
 
 
@@ -399,7 +424,35 @@ def _avg(latencies: list[float]) -> float:
     return sum(latencies) / len(latencies) if latencies else 0.0
 
 
-def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> RunResponse:
+async def _get_visible_run(db: AsyncSession, run_id: uuid.UUID, principal) -> Run:
+    """Fetch a run the caller may see (own or demo); 404 otherwise."""
+    result = await db.execute(
+        select(Run).where(and_(Run.id == run_id, visible_clause(principal.code_id)))
+    )
+    run = result.scalars().first()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+async def _replace_baseline(db: AsyncSession, run: Run, owner_scope) -> None:
+    """Make `run` the only baseline within one owner scope."""
+    # Clear this owner's existing baseline before setting the new one, using a
+    # bulk UPDATE to avoid a separate SELECT + loop. synchronize_session=False
+    # skips the in-memory cache update; the commit and refresh below make the
+    # session consistent again.
+    await db.execute(
+        update(Run)
+        .where(and_(owner_scope, Run.is_baseline == True))  # noqa: E712
+        .values(is_baseline=False)
+        .execution_options(synchronize_session=False)
+    )
+    run.is_baseline = True
+    await db.commit()
+    await db.refresh(run)
+
+
+def _run_to_response(run: Run, baseline: "Run | None" = None) -> RunResponse:
     """
     Map ORM Run → RunResponse.
 
@@ -407,8 +460,10 @@ def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> Run
     in theory); we take the first entry for the summary because we only ever
     write one Metrics row per run today.
 
-    When baseline_metrics is provided and this run is not itself the baseline,
-    percentage deltas are computed and included in the response.
+    `baseline` is the caller's effective baseline (own, else demo). The
+    response reports is_baseline relative to it, so a caller with their own
+    baseline never sees the demo baseline flagged as well. Deltas are computed
+    for every other run that has metrics.
     """
     from app.schemas.run import MetricsSummary
 
@@ -425,7 +480,10 @@ def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> Run
     delta_avg_latency_pct = None
     delta_error_rate_pct = None
 
-    if baseline_metrics and not run.is_baseline and run.metrics:
+    is_baseline = baseline is not None and run.id == baseline.id
+    baseline_metrics = baseline.metrics[0] if (baseline and baseline.metrics) else None
+
+    if baseline_metrics and not is_baseline and run.metrics:
         m = run.metrics[0]
         delta_p50_pct = _pct_delta(m.p50, baseline_metrics.p50)
         delta_p95_pct = _pct_delta(m.p95, baseline_metrics.p95)
@@ -450,7 +508,7 @@ def _run_to_response(run: Run, baseline_metrics: "Metrics | None" = None) -> Run
         num_requests=run.num_requests,
         concurrency=run.concurrency,
         status=run.status,
-        is_baseline=run.is_baseline,
+        is_baseline=is_baseline,
         created_at=run.created_at,
         metrics=metrics_summary,
         delta_p50_pct=delta_p50_pct,
