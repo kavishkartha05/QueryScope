@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 
 # Test configuration must be in the environment BEFORE app modules import,
@@ -46,6 +47,41 @@ def _isolate_settings_and_limiter(monkeypatch):
     monkeypatch.setattr("app.api.runs.index_run", _no_index)
     login_limiter._per_ip.clear()
     login_limiter._global.clear()
+
+
+# Public-looking addresses for tests that need a target to resolve.
+DEFAULT_DNS = {
+    "httpbin.org": ["93.184.216.34"],
+    "example.com": ["93.184.216.34"],
+}
+
+
+class FakeDNS:
+    """hostname -> addresses table; `calls` records every lookup made."""
+
+    def __init__(self) -> None:
+        self.table: dict[str, list[str]] = dict(DEFAULT_DNS)
+        self.calls: list[str] = []
+
+    def __setitem__(self, host: str, addresses: list[str]) -> None:
+        self.table[host] = addresses
+
+    async def resolve(self, host: str, port: int) -> list[str]:
+        self.calls.append(host)
+        if host not in self.table:
+            raise socket.gaierror("name not known")
+        return list(self.table[host])
+
+
+@pytest.fixture(autouse=True)
+def dns(monkeypatch):
+    """
+    Replace real DNS so tests never touch the network and can make any name
+    resolve to any address. Unknown names fail to resolve, like NXDOMAIN.
+    """
+    fake = FakeDNS()
+    monkeypatch.setattr("app.services.ssrf._resolve_host", fake.resolve)
+    return fake
 
 
 @pytest_asyncio.fixture(autouse=True)
