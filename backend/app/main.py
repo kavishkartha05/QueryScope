@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 logging.basicConfig(level=logging.INFO)
 
@@ -12,8 +14,14 @@ from app.api.auth import router as auth_router
 from app.api.runs import admin_router as runs_admin_router
 from app.api.runs import router as runs_router
 from app.core.config import settings
+from app.core.db import engine
 from app.core.security import validate_auth_settings
 from app.services.reaper import reap_stale_runs, reaper_loop
+
+
+async def _probe_database() -> None:
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
 
 
 @asynccontextmanager
@@ -57,8 +65,21 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict:
-        return {"status": "ok"}
+    async def health():
+        # Readiness, not just liveness: an orchestrator should stop sending
+        # traffic to an instance that cannot reach its database. The response
+        # says only that the database is down, never why (no hostnames or
+        # driver errors in a public endpoint); the reason goes to the log.
+        try:
+            await asyncio.wait_for(_probe_database(), timeout=settings.health_db_timeout_s)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Health check: database unavailable (%s)", type(exc).__name__
+            )
+            return JSONResponse(
+                status_code=503, content={"status": "unavailable", "database": "down"}
+            )
+        return {"status": "ok", "database": "ok"}
 
     app.include_router(auth_router)
     app.include_router(admin_router)
