@@ -63,6 +63,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
         allow_credentials=False,
+        # Browsers hide Retry-After from cross-origin scripts unless exposed;
+        # the UI uses it for "try again in N minutes".
+        expose_headers=["Retry-After"],
     )
 
     @app.get("/health")

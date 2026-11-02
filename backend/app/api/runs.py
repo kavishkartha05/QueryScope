@@ -294,6 +294,25 @@ async def get_baseline_run(db: DB, principal: CurrentPrincipal) -> RunResponse:
 
 
 # ---------------------------------------------------------------------------
+# DELETE /runs/baseline  — clear the caller's own baseline. Afterwards the
+# demo baseline (if any) applies again. Callers never touch the demo baseline.
+# ---------------------------------------------------------------------------
+
+@router.delete("/runs/baseline", status_code=200)
+async def clear_baseline(db: DB, principal: CurrentPrincipal) -> dict[str, str]:
+    result = await db.execute(
+        update(Run)
+        .where(and_(owned_clause(principal.code_id), Run.is_baseline == True))  # noqa: E712
+        .values(is_baseline=False)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="You have no baseline to clear")
+    await db.commit()
+    return {"message": "Baseline cleared"}
+
+
+# ---------------------------------------------------------------------------
 # PATCH /runs/{run_id}/baseline
 # ---------------------------------------------------------------------------
 

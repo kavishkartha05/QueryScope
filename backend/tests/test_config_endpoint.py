@@ -58,3 +58,32 @@ async def test_nothing_is_demo_when_auth_is_off(client, monkeypatch):
     await make_run(None)
     items = (await client.get("/benchmark/runs")).json()["items"]
     assert items[0]["is_demo"] is False
+
+
+async def test_caller_can_clear_their_own_baseline(client):
+    code_id, h = await auth(client, "clear-own")
+    run = await make_run(code_id, baseline=True)
+    demo = await make_run(None, baseline=True)
+
+    assert (await client.delete("/benchmark/runs/baseline", headers=h)).status_code == 200
+    # Own baseline is gone, so the demo baseline applies again.
+    baseline = (await client.get("/benchmark/runs/baseline", headers=h)).json()
+    assert baseline["id"] == str(demo)
+    assert baseline["id"] != str(run)
+
+
+async def test_clearing_never_touches_the_demo_baseline(client):
+    _, h = await auth(client, "clear-demo")
+    demo = await make_run(None, baseline=True)
+    # Nothing of their own to clear: 404, and the demo baseline stays.
+    assert (await client.delete("/benchmark/runs/baseline", headers=h)).status_code == 404
+    assert (await client.get("/benchmark/runs/baseline", headers=h)).json()["id"] == str(demo)
+
+
+async def test_clear_baseline_requires_a_session(client):
+    assert (await client.delete("/benchmark/runs/baseline")).status_code == 401
+
+
+async def test_retry_after_is_exposed_to_browsers(client):
+    resp = await client.get("/health", headers={"Origin": "http://localhost:5173"})
+    assert "retry-after" in resp.headers.get("access-control-expose-headers", "").lower()
