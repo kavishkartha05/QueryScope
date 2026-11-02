@@ -181,3 +181,20 @@ def test_transport_refuses_to_start_if_httpx_internals_change(monkeypatch):
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "__init__", _no_pool)
     with pytest.raises(RuntimeError):
         PinnedTransport({"x.example.test": ["8.8.8.8"]})
+
+
+async def test_run_benchmark_engine_works_through_the_pinned_client():
+    from app.services.runner import run_benchmark
+
+    server, port = await _serve(_echo_host)
+    async with server:
+        result = await run_benchmark(
+            target_url=f"http://engine.example.test:{port}/",
+            method="GET",
+            num_requests=6,
+            concurrency=3,
+            pins={"engine.example.test": ["127.0.0.1"]},
+            timeout_s=5.0,
+        )
+    assert len(result["latencies"]) == 6
+    assert result["error_count"] == 0

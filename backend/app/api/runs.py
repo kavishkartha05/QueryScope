@@ -25,6 +25,7 @@ from app.schemas.run import (
 from app.services.aggregator import compute_metrics
 from app.services.indexer import index_run
 from app.services.runner import run_benchmark, run_llm_benchmark
+from app.services.ssrf import TargetRejected, validate_target
 from app.services.scope import (
     effective_baseline,
     index_owner_value,
@@ -68,11 +69,18 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             run.status = RunStatus.running
             await session.commit()
 
+            # Resolve again right before connecting: DNS may have changed since
+            # the request was accepted. The addresses validated here are the
+            # ones the connections are pinned to.
+            target = await validate_target(str(req.target_url))
+
             result = await run_benchmark(
                 target_url=str(req.target_url),
                 method=req.method,
                 num_requests=req.num_requests,
                 concurrency=req.concurrency,
+                pins={target.host: target.addresses},
+                timeout_s=settings.max_request_timeout_s,
                 headers=req.headers,
                 body=req.body,
             )
@@ -157,6 +165,13 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
                 logger.warning("Indexing failed for run %s: %s", run.id, exc)
             logger.info("Indexing block completed for run %s", run_id)
 
+        except TargetRejected as rejected:
+            # The target passed the check at request time but not now (for
+            # example DNS started returning an internal address). Nothing was sent.
+            logger.warning("Run %s refused before connecting: %s", run_id, rejected)
+            run.status = RunStatus.failed
+            await session.commit()
+
         except Exception as bg_exc:
             logger.exception("Background task failed for run %s: %s", run_id, bg_exc)
             run.status = RunStatus.failed
@@ -174,6 +189,12 @@ async def create_benchmark(
     db: DB,
     principal: CurrentPrincipal,
 ) -> RunCreatedResponse:
+    # Reject unsafe targets before a row exists: 422 with a readable reason.
+    try:
+        await validate_target(str(req.target_url))
+    except TargetRejected as rejected:
+        raise HTTPException(status_code=422, detail=str(rejected))
+
     run = Run(
         target_url=str(req.target_url),
         method=req.method.upper(),

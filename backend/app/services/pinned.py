@@ -22,6 +22,11 @@ import httpx
 from app.core.config import settings
 
 
+def _key(host: str) -> str:
+    # "example.com." and "example.com" are the same host.
+    return host.lower().rstrip(".")
+
+
 class PinnedBackend(httpcore.AsyncNetworkBackend):
     def __init__(
         self,
@@ -30,7 +35,7 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
     ) -> None:
         self._pins: dict[str, list[str]] = {}
         for host, addresses in pins.items():
-            self._pins[host.lower()] = list(addresses)
+            self._pins[_key(host)] = list(addresses)
         self._inner = inner if inner is not None else httpcore.AnyIOBackend()
 
     async def connect_tcp(
@@ -41,7 +46,7 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
         local_address: str | None = None,
         socket_options=None,
     ):
-        addresses = self._pins.get(host.lower())
+        addresses = self._pins.get(_key(host))
         if not addresses:
             raise httpcore.ConnectError("Host is not a pinned benchmark target")
         last_error: Exception | None = None
