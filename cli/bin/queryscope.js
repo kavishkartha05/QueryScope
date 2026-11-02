@@ -3,10 +3,10 @@
  * queryscope CLI
  *
  * Commands:
- *   queryscope init   — first-time setup: prompts for secrets, writes .env,
+ *   queryscope init  , first-time setup: prompts for secrets, writes .env,
  *                       builds + starts the Docker stack, creates Azure index
- *   queryscope start  — start the stack (assumes .env already exists)
- *   queryscope reset  — delete all benchmark runs via the API
+ *   queryscope start , start the stack (assumes .env already exists)
+ *   queryscope reset , delete all benchmark runs via the API
  */
 
 import chalk from "chalk";
@@ -126,7 +126,7 @@ async function cmdInit() {
 
   // ── Check Docker ─────────────────────────────────────────────────────────
   const dockerSpinner = ora("Checking Docker…").start();
-  // reject: false tells execa to never throw on a non-zero exit code — warnings
+  // reject: false tells execa to never throw on a non-zero exit code, warnings
   // written to stderr were causing false failures even when Docker was healthy.
   const dockerResult = await execa("docker", ["info"], {
     cwd: ROOT,
@@ -233,7 +233,7 @@ async function cmdInit() {
       const res = await apiFetch("/benchmark/runs");
       if (isUp(res)) { apiReady = true; break; }
     } catch {
-      // still starting up — keep polling
+      // still starting up, keep polling
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -291,7 +291,7 @@ async function cmdStart() {
     fatal("See output above for details.");
   }
 
-  // Poll until the backend is ready — migrations run at startup.
+  // Poll until the backend is ready, migrations run at startup.
   const apiSpinner = ora("Waiting for backend to be ready…").start();
   const deadline = Date.now() + 60_000;
   let apiReady = false;
@@ -319,7 +319,7 @@ async function cmdStart() {
 
 function cmdMcp() {
   // Print the JSON snippet the user needs to paste into claude_desktop_config.json.
-  // Using npx means the user doesn't need a global install — npx will pull
+  // Using npx means the user doesn't need a global install, npx will pull
   // queryscope-mcp from the npm registry on first use and cache it locally.
   console.log(`
   Add this to ${chalk.cyan("~/Library/Application Support/Claude/claude_desktop_config.json")}:
@@ -329,7 +329,7 @@ function cmdMcp() {
       ${chalk.dim('"queryscope":')} ${chalk.dim("{")}
         ${chalk.dim('"command":')} ${chalk.green('"npx"')}${chalk.dim(",")}
         ${chalk.dim('"args":')} ${chalk.green('["queryscope-mcp"]')}${chalk.dim(",")}
-        ${chalk.dim('"env":')} ${chalk.dim("{")} ${chalk.dim("optional, for a hosted deployment:")}
+        ${chalk.dim('"env":')} ${chalk.dim("{")}
           ${chalk.dim('"QUERYSCOPE_URL":')} ${chalk.green('"https://<your-api-host>"')}${chalk.dim(",")}
           ${chalk.dim('"QUERYSCOPE_ACCESS_CODE":')} ${chalk.green('"<your access code>"')}
         ${chalk.dim("}")}
@@ -337,6 +337,7 @@ function cmdMcp() {
     ${chalk.dim("}")}
   ${chalk.dim("}")}
 
+  The "env" block is only for a hosted deployment; leave it out for a local stack.
   Then restart Claude Desktop.
 `);
 }
@@ -382,7 +383,7 @@ async function cmdReset() {
 const command = process.argv[2];
 
 const HELP = `
-${chalk.bold("queryscope")} — QueryScope CLI
+${chalk.bold("queryscope")}, QueryScope CLI
 
 ${chalk.bold("Usage:")}
   queryscope ${chalk.cyan("init")}    First-time setup: configure secrets, build, and start the stack
