@@ -22,12 +22,15 @@ be used to map internal DNS.
 """
 import asyncio
 import ipaddress
+import logging
 import socket
 from dataclasses import dataclass
 
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _MAX_URL_LENGTH = 2048
 
@@ -242,7 +245,41 @@ async def resolve_target(parsed: ParsedTarget) -> ResolvedTarget:
     )
 
 
+def allowed_hosts() -> list[str]:
+    """
+    The configured allowlist as exact ASCII (punycode) hostnames. Entries that
+    are not plain hostnames (wildcards, ports, paths) are dropped with a
+    warning rather than half-matched: matching is exact, never by suffix.
+    """
+    hosts: list[str] = []
+    for entry in settings.allowed_target_host_list:
+        bad = False
+        for ch in entry:
+            if ch in "*/@:?#\\ []%":
+                bad = True
+        if bad:
+            logger.warning("Ignoring invalid ALLOWED_TARGET_HOSTS entry %r", entry)
+            continue
+        try:
+            hosts.append(entry.encode("idna").decode("ascii"))
+        except UnicodeError:
+            logger.warning("Ignoring invalid ALLOWED_TARGET_HOSTS entry %r", entry)
+    return hosts
+
+
+def check_allowlist(host: str) -> None:
+    """Exact-match the (already normalised) target host against the allowlist."""
+    if not settings.allowlist_enforced:
+        return
+    # `in` on a list is an exact string comparison: "httpbin.org.evil.com",
+    # "evilhttpbin.org" and "sub.httpbin.org" are all different strings.
+    if host not in allowed_hosts():
+        raise TargetRejected("Target host is not on the allowlist for this demo")
+
+
 async def validate_target(url: str) -> ResolvedTarget:
-    """Parse, resolve and check one target URL. Raises TargetRejected."""
+    """Parse, check the allowlist, resolve and check one target URL. Raises TargetRejected."""
     parsed = parse_target(url)
+    # The allowlist runs before any DNS lookup, so arbitrary names are never resolved.
+    check_allowlist(parsed.host)
     return await resolve_target(parsed)

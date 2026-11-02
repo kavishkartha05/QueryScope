@@ -11,6 +11,13 @@ from app.services.ssrf import TargetRejected, blocked_reason, parse_target, vali
 # Captured at import time, before the autouse `dns` fixture stubs the module attribute.
 REAL_RESOLVE_HOST = ssrf._resolve_host
 
+@pytest.fixture(autouse=True)
+def _allowlist_off(monkeypatch):
+    # These tests are about the address checks; the allowlist has its own file.
+    # With it on, many cases would be rejected for the wrong reason.
+    monkeypatch.setattr(settings, "target_allowlist_enabled", False)
+
+
 # --- address classification ---------------------------------------------------
 
 BLOCKED_ADDRESSES = [
