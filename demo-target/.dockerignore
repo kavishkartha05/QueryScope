@@ -1,6 +1,7 @@
-tests/
 __pycache__/
 *.pyc
 .pytest_cache/
-README.md
+tests/
 pytest.ini
+.env
+.git/
