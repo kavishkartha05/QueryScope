@@ -1,7 +1,7 @@
 /* ── QueryScope global styles ─────────────────────────────────────────────── */
 
 :root {
-  /* Color palette — dark theme as default */
+  /* Color palette, dark theme as default */
   --bg:           #0d0e14;
   --surface:      #13141c;
   --surface-2:    #1a1b26;
@@ -104,3 +104,42 @@ body {
 
 /* Selection */
 ::selection { background: var(--accent-glow); color: var(--text-bright); }
+
+/* ── Shared UI helpers (focus, responsive layout) ─────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+.qs-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.qs-nav { padding: 0 32px; }
+.qs-main { padding: 36px 24px 96px; }
+.qs-card { padding: 28px 32px; }
+.qs-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.qs-grid-url { display: grid; grid-template-columns: 1fr 130px; gap: 12px; }
+.qs-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+button, input, select { min-height: 40px; }
+
+@media (max-width: 640px) {
+  .qs-nav { padding: 0 14px; }
+  .qs-main { padding: 20px 12px 64px; }
+  .qs-card { padding: 18px 14px; }
+  .qs-grid-2, .qs-grid-url, .qs-grid-3 { grid-template-columns: 1fr; }
+  .qs-hide-mobile { display: none; }
+  /* 16px stops iOS Safari from zooming into inputs on focus. */
+  input, select, textarea { font-size: 16px !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
