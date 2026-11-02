@@ -438,13 +438,14 @@ Delete the resource group when the demo period ends.
 
 ## 16. Not validated, and not done
 
-- The Bicep templates were **not compiled or deployed**: no Bicep or Azure CLI was
-  available when they were written. Run `az bicep build --file infra/main.bicep`
-  first and fix any error or warning. Metric names in the alert rules
-  (`RestartCount`, `Requests`, `storage_percent`) and the preview Postgres API
-  version are the likeliest places to need an adjustment.
-- The Dockerfiles were not built (no Docker daemon was running). CI does not
-  build images either; the first build happens in the deploy workflow.
+- The Bicep templates compile cleanly with `az bicep build` (no errors or
+  warnings), but were **never deployed**. The compiler does not check alert metric
+  names (`RestartCount`, `Requests`, `storage_percent`), SKU availability in your
+  region, or role-assignment timing, so the first real deployment may still need
+  adjustments.
+- The three images build and run locally (backend against Postgres with
+  `RUN_MIGRATIONS=true`, frontend, demo-target), but they were not built by CI or
+  pushed to ACR, and `ssl=require` against Azure Postgres was not exercised.
 - The workflows passed `actionlint` but were never run.
 - The local `docker-compose.yml` still uses the old Docker Hub images, which
   predate access control. If you rebuild them from current source, run locally
