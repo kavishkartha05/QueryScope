@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # TARGET_ALLOWLIST_ENABLED overrides it either way.
     allowed_target_hosts: str = "httpbin.org"
     target_allowlist_enabled: bool | None = None
+    # Full URL of our own demo target (for example https://demo.example.com/work).
+    # Only used by GET /config so the UI can offer it; its host must also be in
+    # ALLOWED_TARGET_HOSTS to be accepted by the allowlist.
+    demo_target_url: str = ""
     # LLM benchmark route. Defaults to OFF when auth is on (it forwards a
     # caller-supplied API key to a caller-supplied endpoint); LLM_BENCHMARK_ENABLED
     # overrides it either way.

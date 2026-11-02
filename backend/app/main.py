@@ -11,6 +11,7 @@ logging.basicConfig(level=logging.INFO)
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.config import router as config_router
 from app.api.runs import admin_router as runs_admin_router
 from app.api.runs import router as runs_router
 from app.core.config import settings
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(config_router)
     app.include_router(runs_admin_router)
     # prefix="" because the router already carries /benchmark and /runs prefixes
     app.include_router(runs_router)
