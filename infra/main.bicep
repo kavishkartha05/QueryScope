@@ -123,7 +123,6 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   sku: { name: acrSku }
   properties: {
     adminUserEnabled: false // pull via managed identity, push via the deploy identity
-    anonymousPullEnabled: false
   }
 }
 
@@ -229,7 +228,8 @@ resource staticSite 'Microsoft.Web/staticSites@2023-12-01' = {
 
 // ---------------------------------------------------------------------- apps
 
-var kvUri = kv.properties.vaultUri
+// Built from the name, not kv.properties, so it is known at the start of the deployment
+var kvUri = 'https://${kvName}${environment().suffixes.keyvaultDns}/'
 
 // Container Apps secret -> Key Vault reference through the managed identity.
 var secretDefs = [
