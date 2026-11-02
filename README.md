@@ -2,7 +2,7 @@
 
 > Developer observability tool that runs load benchmarks against REST and LLM-backed API endpoints, stores results, tracks regressions against a pinned baseline, enforces SLA thresholds, and lets engineers query degradation patterns in natural language via a RAG pipeline.
 
-**The gap QueryScope fills:** existing load testers (k6, JMeter) produce static reports with no AI layer. LLM observability tools (LangSmith, Langfuse) monitor AI apps but don't run load tests. QueryScope sits in the middle — self-hostable, open-source, and AI-powered.
+**The gap QueryScope fills:** existing load testers (k6, JMeter) produce static reports with no AI layer. LLM observability tools (LangSmith, Langfuse) monitor AI apps but don't run load tests. QueryScope sits in the middle, self-hostable, open-source, and AI-powered.
 
 ---
 
@@ -86,10 +86,10 @@ You can also trigger benchmarks directly from Claude Desktop or Cursor via the M
 QueryScope fires configurable concurrent HTTP requests at any REST endpoint using `httpx.AsyncClient` with an `asyncio.Semaphore` for concurrency control. Each request's latency is recorded in milliseconds. After all requests complete, `numpy.percentile` computes p50/p95/p99. Results are stored in PostgreSQL with raw latency arrays for later analysis.
 
 ### Baseline pinning and regression detection
-Any completed run can be pinned as a baseline. Once pinned, all subsequent runs automatically compute percentage deltas against it for p50, p95, p99, avg latency, and error rate. Deltas are returned from the API and rendered inline as color-coded chips in the dashboard — red for regressions, green for improvements, gray for negligible change (±2%). Only one baseline can be active at a time; pinning a new run atomically clears the previous one.
+Any completed run can be pinned as a baseline. Once pinned, all subsequent runs automatically compute percentage deltas against it for p50, p95, p99, avg latency, and error rate. Deltas are returned from the API and rendered inline as color-coded chips in the dashboard, red for regressions, green for improvements, gray for negligible change (±2%). Only one baseline can be active at a time; pinning a new run atomically clears the previous one.
 
 ### SLA threshold enforcement
-Before running a benchmark, you can optionally define pass/fail SLA thresholds for any combination of p50, p95, p99, avg latency, and error rate. After the run completes, each threshold is evaluated against the actual result and stored on the run record. The dashboard surfaces a prominent SLA Pass or SLA Fail badge per run, with a clickable per-threshold breakdown table showing target, actual, and delta values. SLA config and results are fully persisted — no frontend state involved.
+Before running a benchmark, you can optionally define pass/fail SLA thresholds for any combination of p50, p95, p99, avg latency, and error rate. After the run completes, each threshold is evaluated against the actual result and stored on the run record. The dashboard surfaces a prominent SLA Pass or SLA Fail badge per run, with a clickable per-threshold breakdown table showing target, actual, and delta values. SLA config and results are fully persisted, no frontend state involved.
 
 ### LLM endpoint benchmarking
 A dedicated mode for AI APIs measures time-to-first-token (TTFT) and chunks-per-second by consuming the SSE stream incrementally. Useful for comparing OpenAI vs Gemini vs Claude response characteristics under load.
@@ -109,12 +109,28 @@ When you ask a question via `/diagnose`:
 
 ### MCP server
 The Node.js MCP server exposes two tools over stdio:
-- `run_benchmark(target_url, method, num_requests, concurrency)` — triggers a benchmark and returns the run_id
-- `query_runs(limit)` — returns a formatted summary of recent benchmark runs with latency metrics
+- `run_benchmark(target_url, method, num_requests, concurrency)`, triggers a benchmark and returns the run_id
+- `query_runs(limit)`, returns a formatted summary of recent benchmark runs with latency metrics
 
 Connect it to Claude Desktop and you can say "benchmark httpbin with 50 requests at concurrency 10" and Claude will call the tool, run the benchmark, and analyze the results autonomously.
 
 ---
+
+## Hosted Demo
+
+A live, invite-only demo runs on Azure for recruiters and reviewers.
+
+- **Live URL:** _coming soon (placeholder: add the Static Web App URL here)_
+- **Access:** invite-only. Each visitor gets a personal access code (or a one-click
+  link). To request one, email the address shown on the demo's landing page, or open
+  an issue on this repository.
+- **What it is safe for:** benchmarks can only target a small allowlist (a demo
+  service plus httpbin.org), and runs are capped at 500 requests, concurrency 20,
+  10 s per request and 60 s per run. Your runs are private to your code; the seeded
+  example runs are shared and read-only.
+- **How it is deployed:** see [docs/deploy.md](docs/deploy.md). The hosted backend
+  runs as a single replica by design, so the autoscaler in `k8s/hpa.yaml` does not
+  apply to it.
 
 ## Quick Start
 
@@ -163,7 +179,7 @@ Run `npx queryscope-cli mcp` to print the config snippet, then paste it into `~/
 }
 ```
 
-Restart Claude Desktop and you can say *"Use queryscope to benchmark https://api.example.com/endpoint with 20 requests"* — Claude will call the tool, fire the HTTP requests, and analyze the results autonomously.
+Restart Claude Desktop and you can say *"Use queryscope to benchmark https://api.example.com/endpoint with 20 requests"*, Claude will call the tool, fire the HTTP requests, and analyze the results autonomously.
 
 ---
 
