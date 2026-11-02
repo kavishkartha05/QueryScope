@@ -1,0 +1,138 @@
+name: Deploy (manual)
+
+# Manual only. Needs the repository variables listed in docs/deploy.md and an
+# Entra app registration with a federated credential for the "production"
+# environment. No cloud passwords are stored in GitHub.
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_frontend:
+        description: Also build and deploy the frontend
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write # OIDC token for azure/login
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 40
+    env:
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR: ${{ vars.ACR_NAME }}
+      BACKEND_APP: ${{ vars.BACKEND_APP }}
+      TARGET_APP: ${{ vars.DEMO_TARGET_APP }}
+      MIGRATE_JOB: ${{ vars.MIGRATE_JOB }}
+      SWA_NAME: ${{ vars.SWA_NAME }}
+      API_URL: ${{ vars.API_URL }}
+      TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Log in to Azure (OIDC)
+        uses: azure/login@v2.2.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to the registry
+        run: az acr login --name "$ACR"
+
+      - name: Build and push images
+        run: |
+          set -euo pipefail
+          SERVER="$ACR.azurecr.io"
+          docker build -t "$SERVER/queryscope-backend:$TAG" backend
+          docker build -t "$SERVER/queryscope-demo-target:$TAG" demo-target
+          docker push "$SERVER/queryscope-backend:$TAG"
+          docker push "$SERVER/queryscope-demo-target:$TAG"
+
+      - name: Run database migrations (one-off job)
+        run: |
+          set -euo pipefail
+          SERVER="$ACR.azurecr.io"
+          az containerapp job update -g "$RG" -n "$MIGRATE_JOB" \
+            --image "$SERVER/queryscope-backend:$TAG" --output none
+          EXEC=$(az containerapp job start -g "$RG" -n "$MIGRATE_JOB" --query name -o tsv)
+          echo "Started migration execution $EXEC"
+          for _ in $(seq 1 60); do
+            STATUS=$(az containerapp job execution show -g "$RG" -n "$MIGRATE_JOB" \
+              --job-execution-name "$EXEC" --query properties.status -o tsv)
+            echo "Migration status: $STATUS"
+            if [ "$STATUS" = "Succeeded" ]; then exit 0; fi
+            if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Stopped" ]; then
+              echo "Migration did not succeed; apps were NOT updated." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for the migration job." >&2
+          exit 1
+
+      - name: Update the apps
+        run: |
+          set -euo pipefail
+          SERVER="$ACR.azurecr.io"
+          az containerapp update -g "$RG" -n "$BACKEND_APP" \
+            --image "$SERVER/queryscope-backend:$TAG" --output none
+          az containerapp update -g "$RG" -n "$TARGET_APP" \
+            --image "$SERVER/queryscope-demo-target:$TAG" --output none
+
+      - name: Check the backend is healthy
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            if curl -fsS "$API_URL/health" >/dev/null; then
+              echo "Backend healthy"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Backend did not become healthy" >&2
+          exit 1
+
+      - uses: actions/setup-node@v4.1.0
+        if: ${{ inputs.deploy_frontend }}
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the frontend
+        if: ${{ inputs.deploy_frontend }}
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build:swa
+
+      - name: Fetch the Static Web Apps deployment token
+        if: ${{ inputs.deploy_frontend }}
+        id: swa
+        run: |
+          set -euo pipefail
+          TOKEN=$(az staticwebapp secrets list -g "$RG" -n "$SWA_NAME" --query properties.apiKey -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the frontend
+        if: ${{ inputs.deploy_frontend }}
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          # The bundle is already built; dist/ contains the rendered
+          # staticwebapp.config.json.
+          skip_app_build: true
+          skip_api_build: true
+          app_location: frontend/dist
