@@ -40,6 +40,7 @@ The hosted demo limits what a run can do. All limits are settings (see
   addresses, or their IPv6 equivalents. The name is resolved before each run and
   the connections are pinned to the validated addresses, so DNS cannot change
   the destination afterwards. Redirects are not followed.
+- **Demo target URL**: `DEMO_TARGET_URL` is the full URL of the demo target (its host must also be in `ALLOWED_TARGET_HOSTS`); `GET /config` offers it in the UI target picker.
 - **Allowlist**: `ALLOWED_TARGET_HOSTS`, exact hostnames, on by default when auth
   is enabled. The demo target service in `../demo-target` goes on this list.
 - **Caps**: 500 requests, concurrency 20, 10 s per request, 60 s per run.
