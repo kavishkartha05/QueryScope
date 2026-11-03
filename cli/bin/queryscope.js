@@ -3,10 +3,10 @@
  * queryscope CLI
  *
  * Commands:
- *   queryscope init   — first-time setup: prompts for secrets, writes .env,
+ *   queryscope init  , first-time setup: prompts for secrets, writes .env,
  *                       builds + starts the Docker stack, creates Azure index
- *   queryscope start  — start the stack (assumes .env already exists)
- *   queryscope reset  — delete all benchmark runs via the API
+ *   queryscope start , start the stack (assumes .env already exists)
+ *   queryscope reset , delete all benchmark runs via the API
  */
 
 import chalk from "chalk";
@@ -30,6 +30,51 @@ const ENV_PATH = resolve(ROOT, "backend", ".env");
 
 // Read version once at startup so banner and help text stay in sync.
 const pkg = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8"));
+
+// ── Backend URL and optional hosted-deployment auth ────────────────────────
+
+// Defaults keep the local-stack behavior; set QUERYSCOPE_URL to point at a
+// hosted deployment, and QUERYSCOPE_ACCESS_CODE if it requires login.
+const API_URL = (process.env.QUERYSCOPE_URL || "http://localhost:8000").replace(/\/+$/, "");
+const ACCESS_CODE = process.env.QUERYSCOPE_ACCESS_CODE || "";
+// Needed only for `reset` against an auth-enabled backend (admin-only route).
+const ADMIN_KEY = process.env.QUERYSCOPE_ADMIN_KEY || "";
+
+let sessionToken = null;
+
+/** Exchange the access code for a token. Never prints the code or the token. */
+async function loginWithCode() {
+  const res = await fetch(`${API_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: ACCESS_CODE }),
+  });
+  // 404 means the server has auth disabled: carry on without a token.
+  if (res.status === 404) { sessionToken = null; return; }
+  if (!res.ok) {
+    throw new Error(res.status === 401 ? "The access code was not accepted" : `Login failed (${res.status})`);
+  }
+  sessionToken = (await res.json()).token;
+}
+
+/** fetch against the backend; logs in when a code is set and re-logs in once on 401. */
+async function apiFetch(path, init = {}, retried = false) {
+  if (ACCESS_CODE && sessionToken === null) await loginWithCode();
+  const headers = { ...(init.headers || {}) };
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  if (res.status === 401 && ACCESS_CODE && !retried) {
+    sessionToken = null;
+    return apiFetch(path, init, true);
+  }
+  return res;
+}
+
+// The backend is "up" for readiness purposes on any answer below 500, including
+// 401 (running, but this client has no valid login yet).
+function isUp(res) {
+  return res.status < 500;
+}
 
 // ── Banner ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +126,7 @@ async function cmdInit() {
 
   // ── Check Docker ─────────────────────────────────────────────────────────
   const dockerSpinner = ora("Checking Docker…").start();
-  // reject: false tells execa to never throw on a non-zero exit code — warnings
+  // reject: false tells execa to never throw on a non-zero exit code, warnings
   // written to stderr were causing false failures even when Docker was healthy.
   const dockerResult = await execa("docker", ["info"], {
     cwd: ROOT,
@@ -185,10 +230,10 @@ async function cmdInit() {
   let apiReady = false;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch("http://localhost:8000/benchmark/runs");
-      if (res.ok) { apiReady = true; break; }
+      const res = await apiFetch("/benchmark/runs");
+      if (isUp(res)) { apiReady = true; break; }
     } catch {
-      // still starting up — keep polling
+      // still starting up, keep polling
     }
     await new Promise((r) => setTimeout(r, 2000));
   }
@@ -221,8 +266,8 @@ async function cmdInit() {
   console.log(
     chalk.bold.green("\n  QueryScope is running!\n") +
     chalk.dim("  Dashboard  ") + chalk.cyan("http://localhost:5173") + "\n" +
-    chalk.dim("  API        ") + chalk.cyan("http://localhost:8000") + "\n" +
-    chalk.dim("  API docs   ") + chalk.cyan("http://localhost:8000/docs") + "\n"
+    chalk.dim("  API        ") + chalk.cyan(API_URL) + "\n" +
+    chalk.dim("  API docs   ") + chalk.cyan(`${API_URL}/docs`) + "\n"
   );
 }
 
@@ -246,14 +291,14 @@ async function cmdStart() {
     fatal("See output above for details.");
   }
 
-  // Poll until the backend is ready — migrations run at startup.
+  // Poll until the backend is ready, migrations run at startup.
   const apiSpinner = ora("Waiting for backend to be ready…").start();
   const deadline = Date.now() + 60_000;
   let apiReady = false;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch("http://localhost:8000/benchmark/runs");
-      if (res.ok) { apiReady = true; break; }
+      const res = await apiFetch("/benchmark/runs");
+      if (isUp(res)) { apiReady = true; break; }
     } catch {
       // still starting up
     }
@@ -268,13 +313,13 @@ async function cmdStart() {
   console.log(
     "\n" +
     chalk.dim("  Dashboard  ") + chalk.cyan("http://localhost:5173") + "\n" +
-    chalk.dim("  API        ") + chalk.cyan("http://localhost:8000") + "\n"
+    chalk.dim("  API        ") + chalk.cyan(API_URL) + "\n"
   );
 }
 
 function cmdMcp() {
   // Print the JSON snippet the user needs to paste into claude_desktop_config.json.
-  // Using npx means the user doesn't need a global install — npx will pull
+  // Using npx means the user doesn't need a global install, npx will pull
   // queryscope-mcp from the npm registry on first use and cache it locally.
   console.log(`
   Add this to ${chalk.cyan("~/Library/Application Support/Claude/claude_desktop_config.json")}:
@@ -283,11 +328,16 @@ function cmdMcp() {
     ${chalk.dim('"mcpServers":')} ${chalk.dim("{")}
       ${chalk.dim('"queryscope":')} ${chalk.dim("{")}
         ${chalk.dim('"command":')} ${chalk.green('"npx"')}${chalk.dim(",")}
-        ${chalk.dim('"args":')} ${chalk.green('["queryscope-mcp"]')}
+        ${chalk.dim('"args":')} ${chalk.green('["queryscope-mcp"]')}${chalk.dim(",")}
+        ${chalk.dim('"env":')} ${chalk.dim("{")}
+          ${chalk.dim('"QUERYSCOPE_URL":')} ${chalk.green('"https://<your-api-host>"')}${chalk.dim(",")}
+          ${chalk.dim('"QUERYSCOPE_ACCESS_CODE":')} ${chalk.green('"<your access code>"')}
+        ${chalk.dim("}")}
       ${chalk.dim("}")}
     ${chalk.dim("}")}
   ${chalk.dim("}")}
 
+  The "env" block is only for a hosted deployment; leave it out for a local stack.
   Then restart Claude Desktop.
 `);
 }
@@ -308,8 +358,9 @@ async function cmdReset() {
 
   const spinner = ora("Resetting session…").start();
   try {
-    const res = await fetch("http://localhost:8000/benchmark/runs", {
+    const res = await apiFetch("/benchmark/runs", {
       method: "DELETE",
+      headers: ADMIN_KEY ? { "X-Admin-Key": ADMIN_KEY } : {},
     });
     if (!res.ok) {
       const body = await res.text();
@@ -332,13 +383,18 @@ async function cmdReset() {
 const command = process.argv[2];
 
 const HELP = `
-${chalk.bold("queryscope")} — QueryScope CLI
+${chalk.bold("queryscope")}, QueryScope CLI
 
 ${chalk.bold("Usage:")}
   queryscope ${chalk.cyan("init")}    First-time setup: configure secrets, build, and start the stack
   queryscope ${chalk.cyan("start")}   Start the stack (requires a previous init)
   queryscope ${chalk.cyan("reset")}   Delete all benchmark runs and metrics
   queryscope ${chalk.cyan("mcp")}     Print Claude Desktop MCP config snippet
+
+${chalk.bold("Environment:")}
+  QUERYSCOPE_URL          Backend URL (default http://localhost:8000)
+  QUERYSCOPE_ACCESS_CODE  Access code for a hosted deployment
+  QUERYSCOPE_ADMIN_KEY    Admin key, needed by ${chalk.cyan("reset")} on a hosted deployment
 `;
 
 switch (command) {

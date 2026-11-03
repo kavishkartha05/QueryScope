@@ -1,5 +1,6 @@
 import { useState } from "react";
 import client from "../api/client";
+import { describeError } from "../api/errors";
 import type { DiagnoseResponse } from "../types/run";
 
 const EXAMPLE_QUESTIONS = [
@@ -12,9 +13,9 @@ const EXAMPLE_QUESTIONS = [
 // ── Typing indicator ────────────────────────────────────────────────────────
 
 function TypingIndicator() {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0" }}>
-      {[0, 1, 2].map((i) => (
+  const dots: React.ReactNode[] = [];
+  for (const i of [0, 1, 2]) {
+    dots.push(
         <span
           key={i}
           style={{
@@ -26,7 +27,11 @@ function TypingIndicator() {
             animation: `qs-bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
           }}
         />
-      ))}
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0" }}>
+      {dots}
     </div>
   );
 }
@@ -50,10 +55,43 @@ export default function DiagnosePanel() {
       const res = await client.post<DiagnoseResponse>("/benchmark/diagnose", { question });
       setDiagnosis(res.data.diagnosis);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      setError(describeError(err));
     } finally {
       setLoading(false);
     }
+  }
+
+  const chips: React.ReactNode[] = [];
+  for (const q of EXAMPLE_QUESTIONS) {
+    chips.push(
+            <button
+              key={q}
+              type="button"
+              onClick={() => setQuestion(q)}
+              style={{
+                padding: "3px 11px",
+                background: "#13131f",
+                border: "1px solid #1a1a2e",
+                borderRadius: 20,
+                color: "#8892b0",
+                fontSize: 11,
+                cursor: "pointer",
+                fontFamily:
+                  "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+                transition: "border-color 0.15s, color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "#7c3aed";
+                (e.currentTarget as HTMLButtonElement).style.color = "#ccd6f6";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = "#1a1a2e";
+                (e.currentTarget as HTMLButtonElement).style.color = "#8892b0";
+              }}
+            >
+              {q}
+            </button>
+    );
   }
 
   return (
@@ -101,35 +139,7 @@ export default function DiagnosePanel() {
 
         {/* Example chips */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {EXAMPLE_QUESTIONS.map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => setQuestion(q)}
-              style={{
-                padding: "3px 11px",
-                background: "#13131f",
-                border: "1px solid #1a1a2e",
-                borderRadius: 20,
-                color: "#8892b0",
-                fontSize: 11,
-                cursor: "pointer",
-                fontFamily:
-                  "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-                transition: "border-color 0.15s, color 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = "#7c3aed";
-                (e.currentTarget as HTMLButtonElement).style.color = "#ccd6f6";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = "#1a1a2e";
-                (e.currentTarget as HTMLButtonElement).style.color = "#8892b0";
-              }}
-            >
-              {q}
-            </button>
-          ))}
+          {chips}
         </div>
 
         <button

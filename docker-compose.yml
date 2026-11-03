@@ -27,6 +27,9 @@ services:
       - ./backend/.env
     environment:
       DATABASE_URL: postgresql+asyncpg://queryscope:queryscope@postgres:5432/queryscope
+      # Only used when the image is built from ./backend: the hosted image does
+      # not migrate on start, local compose does.
+      RUN_MIGRATIONS: "true"
 
   frontend:
     # build: ./frontend

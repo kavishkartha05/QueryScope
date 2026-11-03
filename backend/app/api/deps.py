@@ -101,3 +101,14 @@ async def require_admin(
 
 
 AdminOnly = Depends(require_admin)
+
+
+async def require_llm_benchmark_enabled() -> None:
+    """
+    Feature flag for POST /benchmark/llm. The route forwards a caller-supplied API
+    key to a caller-supplied endpoint, so it is off by default on a hosted
+    (auth-enabled) deployment. 404, not 403: when off it should look like it
+    does not exist, with the same body as an unknown route.
+    """
+    if not settings.llm_benchmark_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")

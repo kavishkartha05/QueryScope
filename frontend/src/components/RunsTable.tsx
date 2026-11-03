@@ -4,7 +4,7 @@ import type { Run, RunStatus, SlaThresholdResult } from "../types/run";
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmt(n: number | undefined): string {
-  return n !== undefined ? n.toFixed(1) : "—";
+  return n !== undefined ? n.toFixed(1) : "-";
 }
 
 function relativeTime(iso: string): string {
@@ -58,7 +58,7 @@ const STATUS_CFG: Record<
     color: "#ef4444",
     bg: "rgba(239,68,68,0.10)",
     border: "rgba(239,68,68,0.28)",
-    label: "failed",
+    label: "timed out or failed",
     dotAnim: "none",
   },
 };
@@ -67,6 +67,7 @@ function StatusBadge({ status }: { status: RunStatus }) {
   const cfg = STATUS_CFG[status];
   return (
     <span
+      title={status === "failed" ? "The run hit its time limit, was interrupted, or the target could not be reached" : undefined}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -77,6 +78,7 @@ function StatusBadge({ status }: { status: RunStatus }) {
         fontWeight: 600,
         letterSpacing: "0.06em",
         textTransform: "uppercase",
+        whiteSpace: "nowrap",
         color: cfg.color,
         background: cfg.bg,
         border: `1px solid ${cfg.border}`,
@@ -95,7 +97,34 @@ function StatusBadge({ status }: { status: RunStatus }) {
           borderTopColor: status === "running" ? "transparent" : undefined,
         }}
       />
-      {cfg.label}
+      <span>{cfg.label}</span>
+    </span>
+  );
+}
+
+// ── Demo badge ─────────────────────────────────────────────────────────────
+
+function DemoBadge() {
+  return (
+    <span
+      title="A shared example run. Read-only."
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 20,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.07em",
+        textTransform: "uppercase",
+        color: "#60a5fa",
+        background: "rgba(96,165,250,0.10)",
+        border: "1px solid rgba(96,165,250,0.28)",
+        marginLeft: 6,
+        verticalAlign: "middle",
+        whiteSpace: "nowrap",
+      }}
+    >
+      Example
     </span>
   );
 }
@@ -223,28 +252,9 @@ function SlaBreakdownRow({
   thresholds: SlaThresholdResult[];
   colSpan: number;
 }) {
-  return (
-    <tr>
-      <td
-        colSpan={colSpan}
-        style={{
-          padding: "0 14px 14px 46px",
-          borderBottom: "1px solid #1a1a2e",
-        }}
-      >
-        <table
-          style={{
-            width: "100%",
-            maxWidth: 560,
-            borderCollapse: "collapse",
-            fontSize: 12,
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-          }}
-        >
-          <thead>
-            <tr>
-              {["Metric", "Target", "Actual", "Delta", ""].map((h) => (
+  const slaHeaders: React.ReactNode[] = [];
+  for (const h of ["Metric", "Target", "Actual", "Delta", ""]) {
+    slaHeaders.push(
                 <th
                   key={h}
                   style={{
@@ -260,17 +270,17 @@ function SlaBreakdownRow({
                 >
                   {h}
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {thresholds.map((t) => {
+    );
+  }
+
+  const thresholdRows: React.ReactNode[] = [];
+  for (const t of thresholds) {
               const meta = METRIC_META[t.metric] ?? { label: t.metric, unit: "" };
               const overBudget = t.delta > 0;
               const deltaSign = t.delta > 0 ? "+" : "";
               const deltaStr = `${deltaSign}${t.delta.toFixed(1)}${meta.unit}`;
 
-              return (
+    thresholdRows.push(
                 <tr key={t.metric}>
                   <td style={{ padding: "5px 10px", color: "#ccd6f6" }}>
                     {meta.label}
@@ -318,8 +328,35 @@ function SlaBreakdownRow({
                     </span>
                   </td>
                 </tr>
-              );
-            })}
+    );
+  }
+
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        style={{
+          padding: "0 14px 14px 46px",
+          borderBottom: "1px solid #1a1a2e",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            maxWidth: 560,
+            borderCollapse: "collapse",
+            fontSize: 12,
+            fontFamily:
+              "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+          }}
+        >
+          <thead>
+            <tr>
+              {slaHeaders}
+            </tr>
+          </thead>
+          <tbody>
+            {thresholdRows}
           </tbody>
         </table>
       </td>
@@ -329,21 +366,39 @@ function SlaBreakdownRow({
 
 // ── Pin button ─────────────────────────────────────────────────────────────
 
-function PinButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+function PinButton({
+  active,
+  onClick,
+  disabled,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
+  const name = disabled
+    ? "Example runs are read-only"
+    : active
+    ? "Current baseline"
+    : "Pin as baseline";
   return (
     <button
+      type="button"
+      disabled={disabled}
+      aria-label={name}
+      aria-pressed={active}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
-      title={active ? "Current baseline" : "Pin as baseline"}
+      title={name}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         background: "none",
         border: "none",
-        cursor: active ? "default" : "pointer",
+        cursor: disabled || active ? "default" : "pointer",
+        opacity: disabled ? 0.35 : 1,
         padding: "2px 4px",
         borderRadius: 4,
         color: active ? "#a78bfa" : hovered ? "#ccd6f6" : "#3d3d5c",
@@ -414,8 +469,8 @@ interface RunsTableProps {
   runs: Run[];
   total: number;
   error: string | null;
-  onReset: () => Promise<void>;
   onSetBaseline: (runId: string) => Promise<void>;
+  onClearBaseline: () => Promise<void>;
 }
 
 const TH: React.CSSProperties = {
@@ -439,151 +494,38 @@ const TD: React.CSSProperties = {
 
 const COL_COUNT = 10; // pin + ID + URL + Method + Status + SLA + p50 + p95 + p99 + When
 
-export default function RunsTable({ runs, total, error, onReset, onSetBaseline }: RunsTableProps) {
+export default function RunsTable({ runs, total, error, onSetBaseline, onClearBaseline }: RunsTableProps) {
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   // ID of the run whose SLA breakdown is currently expanded.
   const [expandedSla, setExpandedSla] = useState<string | null>(null);
 
-  const hasBaseline = runs.some((r) => r.is_baseline);
+  // The effective baseline is the caller's own, else the shared example one.
+  let baselineRun: Run | null = null;
+  for (const r of runs) {
+    if (r.is_baseline) baselineRun = r;
+  }
+  const hasBaseline = baselineRun !== null;
+  const ownBaseline = baselineRun !== null && !baselineRun.is_demo;
 
   function toggleSla(runId: string) {
     setExpandedSla((prev) => (prev === runId ? null : runId));
   }
 
-  async function handleReset() {
-    if (!window.confirm("Reset session? This will delete all benchmark runs and clear the diagnosis history.")) {
-      return;
-    }
-    await onReset();
+  const headerCells: React.ReactNode[] = [];
+  for (const col of ["", "ID", "URL", "Method", "Status", "SLA", "p50 ms", "p95 ms", "p99 ms", "When"]) {
+    headerCells.push(
+      <th key={col} scope="col" style={col === "" ? { ...TH, width: 32, padding: "10px 6px" } : TH}>
+        {col === "" ? <span className="qs-visually-hidden">Pin</span> : col}
+      </th>,
+    );
   }
 
-  return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 18,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: 13,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-              color: "#8892b0",
-            }}
-          >
-            Benchmark Runs
-          </h2>
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily:
-                "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
-              color: "#7c3aed",
-              background: "rgba(124,58,237,0.12)",
-              padding: "1px 8px",
-              borderRadius: 10,
-              border: "1px solid rgba(124,58,237,0.28)",
-            }}
-          >
-            {total}
-          </span>
-        </div>
-
-        <button
-          onClick={() => void handleReset()}
-          style={{
-            padding: "4px 12px",
-            background: "rgba(239,68,68,0.08)",
-            border: "1px solid rgba(239,68,68,0.25)",
-            borderRadius: 6,
-            color: "#ef4444",
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: "pointer",
-            letterSpacing: "0.04em",
-            transition: "background 0.15s, border-color 0.15s",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.15)";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.45)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.08)";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.25)";
-          }}
-        >
-          Reset Session
-        </button>
-      </div>
-
-      {error && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "8px 14px",
-            background: "rgba(239,68,68,0.08)",
-            border: "1px solid rgba(239,68,68,0.2)",
-            borderRadius: 8,
-            color: "#ef4444",
-            fontSize: 12,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {runs.length > 0 && !hasBaseline && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "8px 14px",
-            background: "rgba(167,139,250,0.06)",
-            border: "1px solid rgba(167,139,250,0.18)",
-            borderRadius: 8,
-            color: "#8892b0",
-            fontSize: 12,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="17" x2="12" y2="22" />
-            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-          </svg>
-          Pin a completed run as baseline to track regressions across future runs
-        </div>
-      )}
-
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {["", "ID", "URL", "Method", "Status", "SLA", "p50 ms", "p95 ms", "p99 ms", "When"].map(
-                (col) => (
-                  <th
-                    key={col}
-                    style={col === "" ? { ...TH, width: 32, padding: "10px 6px" } : TH}
-                  >
-                    {col}
-                  </th>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((run) => {
+  const rowList: React.ReactNode[] = [];
+  for (const run of runs) {
               const slaStatus = run.sla_result?.status;
               const slaExpanded = expandedSla === run.id;
 
-              return (
+    rowList.push(
                 <Fragment key={run.id}>
                   <tr
                     onMouseEnter={() => setHoveredRow(run.id)}
@@ -602,6 +544,7 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
                       {run.status === "done" && (
                         <PinButton
                           active={run.is_baseline}
+                          disabled={run.is_demo === true}
                           onClick={() => void onSetBaseline(run.id)}
                         />
                       )}
@@ -618,6 +561,7 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
                     >
                       <Tip text={run.id}>{run.id.slice(0, 8)}…</Tip>
                       {run.is_baseline && <BaselineBadge />}
+                      {run.is_demo === true && <DemoBadge />}
                     </td>
 
                     {/* URL */}
@@ -719,7 +663,7 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
                     </td>
                   </tr>
 
-                  {/* Expandable SLA breakdown — rendered below the run row */}
+                  {/* Expandable SLA breakdown, rendered below the run row */}
                   {slaExpanded && run.sla_result && run.sla_result.thresholds.length > 0 && (
                     <SlaBreakdownRow
                       thresholds={run.sla_result.thresholds}
@@ -727,8 +671,126 @@ export default function RunsTable({ runs, total, error, onReset, onSetBaseline }
                     />
                   )}
                 </Fragment>
-              );
-            })}
+    );
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: 13,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              color: "#8892b0",
+            }}
+          >
+            Benchmark Runs
+          </h2>
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Fira Code, Consolas, monospace",
+              color: "#7c3aed",
+              background: "rgba(124,58,237,0.12)",
+              padding: "1px 8px",
+              borderRadius: 10,
+              border: "1px solid rgba(124,58,237,0.28)",
+            }}
+          >
+            {total}
+          </span>
+        </div>
+
+        {ownBaseline && (
+          <button
+            type="button"
+            onClick={() => void onClearBaseline()}
+            style={{
+              padding: "4px 12px",
+              background: "rgba(167,139,250,0.08)",
+              border: "1px solid rgba(167,139,250,0.28)",
+              borderRadius: 6,
+              color: "#a78bfa",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Clear my baseline
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 14,
+            padding: "8px 14px",
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.2)",
+            borderRadius: 8,
+            color: "#ef4444",
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {baselineRun !== null && (
+        <p style={{ margin: "0 0 14px", fontSize: 12, color: "#8892b0", lineHeight: 1.5 }}>
+          Comparing against {ownBaseline ? "your baseline" : "the example baseline"}{" "}
+          <code style={{ color: "#a78bfa" }}>{baselineRun.id.slice(0, 8)}</code>. Percent chips
+          show change versus it: red is slower, green is faster.
+          {!ownBaseline && " Pin one of your own completed runs to compare against that instead."}
+        </p>
+      )}
+
+      {runs.length > 0 && !hasBaseline && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "8px 14px",
+            background: "rgba(167,139,250,0.06)",
+            border: "1px solid rgba(167,139,250,0.18)",
+            borderRadius: 8,
+            color: "#8892b0",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="17" x2="12" y2="22" />
+            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+          </svg>
+          Pin one of your completed runs as the baseline to track regressions
+        </div>
+      )}
+
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {headerCells}
+            </tr>
+          </thead>
+          <tbody>
+            {rowList}
             {runs.length === 0 && (
               <tr>
                 <td

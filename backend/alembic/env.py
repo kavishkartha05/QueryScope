@@ -19,7 +19,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Run without a live DB connection — emits SQL to stdout."""
+    """Run without a live DB connection, emits SQL to stdout."""
     context.configure(
         url=settings.database_url,
         target_metadata=target_metadata,
@@ -43,7 +43,7 @@ def do_run_migrations(connection):
 
 
 async def run_migrations_online() -> None:
-    # Create a throwaway async engine — Alembic drives it synchronously via
+    # Create a throwaway async engine, Alembic drives it synchronously via
     # run_sync(), which is the blessed pattern for async SQLAlchemy + Alembic.
     connectable = create_async_engine(settings.database_url)
     async with connectable.connect() as connection:

@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """\
 You are a performance engineer analyzing API benchmark results.
 You will be given two sources of context:
-  1. Recent runs — the 5 most recent completed benchmark runs from the database.
-  2. Semantically similar runs — runs retrieved from a vector search index that \
+  1. Recent runs, the 5 most recent completed benchmark runs from the database.
+  2. Semantically similar runs, runs retrieved from a vector search index that \
 are most relevant to the question.
-Use ONLY the provided context to answer the question — do not invent data.
+Use ONLY the provided context to answer the question, do not invent data.
 If the context is insufficient, say so clearly.
 Return a concise root cause diagnosis (3–5 sentences maximum).
 """
@@ -101,7 +101,7 @@ async def diagnose(
     """
     credential = AzureKeyCredential(settings.azure_search_key)
 
-    # Mirror the same dual-client setup used in indexer.py — the vector store
+    # Mirror the same dual-client setup used in indexer.py, the vector store
     # requires both sync (index management) and async (query) clients.
     sync_client = SyncSearchIndexClient(
         endpoint=settings.azure_search_endpoint,
@@ -160,7 +160,7 @@ async def diagnose(
             logger.info("Fetching recent runs from Postgres for RCA context")
             recent_context = await _fetch_recent_runs_context(db, access_code_id)
         else:
-            recent_context = "(Database session not provided — recent runs unavailable.)"
+            recent_context = "(Database session not provided, recent runs unavailable.)"
 
         # LCEL chain: inject both context sources + question → prompt → LLM → string.
         # RunnablePassthrough pipes the inputs dict straight into the prompt;

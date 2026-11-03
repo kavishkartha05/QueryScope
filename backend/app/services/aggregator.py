@@ -25,7 +25,7 @@ def compute_metrics(
     # num_requests values.
     p50, p95, p99 = (float(np.percentile(arr, q)) for q in (50, 95, 99))
 
-    # throughput counts all attempts (including errors) — consistent with how
+    # throughput counts all attempts (including errors), consistent with how
     # load-testing tools like wrk and k6 report req/s.
     throughput = num_requests / total_time
 

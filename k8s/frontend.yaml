@@ -32,6 +32,6 @@ spec:
   ports:
     - port: 5173
       targetPort: 4173
-      # nodePort omitted — Kubernetes auto-assigns from the 30000–32767 range.
+      # nodePort omitted, Kubernetes auto-assigns from the 30000–32767 range.
       # Run `kubectl get svc frontend -n queryscope` to find the assigned port,
       # then access via $(minikube ip):<nodePort>.

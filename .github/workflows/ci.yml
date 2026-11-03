@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.11"
+      - name: Install Poetry
+        # Same version that wrote poetry.lock.
+        run: pip install "poetry==2.5.1"
+      - name: Install dependencies
+        run: poetry install --no-root --no-ansi
+      - name: Tests (SQLite, no network)
+        run: poetry run pytest -q
+
+  demo-target:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: demo-target
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Type-check
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npm test
+      - name: Build and render the SWA config
+        env:
+          VITE_API_URL: https://api.example.invalid
+        run: npm run build:swa
+
+  node-packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version: "20"
+      - name: Build the MCP server
+        working-directory: mcp-server
+        run: |
+          npm ci --ignore-scripts
+          npx tsc --noEmit
+      - name: Syntax-check the CLI
+        working-directory: cli
+        run: node --check bin/queryscope.js

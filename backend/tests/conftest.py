@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 
 # Test configuration must be in the environment BEFORE app modules import,
@@ -48,6 +49,41 @@ def _isolate_settings_and_limiter(monkeypatch):
     login_limiter._global.clear()
 
 
+# Public-looking addresses for tests that need a target to resolve.
+DEFAULT_DNS = {
+    "httpbin.org": ["93.184.216.34"],
+    "example.com": ["93.184.216.34"],
+}
+
+
+class FakeDNS:
+    """hostname -> addresses table; `calls` records every lookup made."""
+
+    def __init__(self) -> None:
+        self.table: dict[str, list[str]] = dict(DEFAULT_DNS)
+        self.calls: list[str] = []
+
+    def __setitem__(self, host: str, addresses: list[str]) -> None:
+        self.table[host] = addresses
+
+    async def resolve(self, host: str, port: int) -> list[str]:
+        self.calls.append(host)
+        if host not in self.table:
+            raise socket.gaierror("name not known")
+        return list(self.table[host])
+
+
+@pytest.fixture(autouse=True)
+def dns(monkeypatch):
+    """
+    Replace real DNS so tests never touch the network and can make any name
+    resolve to any address. Unknown names fail to resolve, like NXDOMAIN.
+    """
+    fake = FakeDNS()
+    monkeypatch.setattr("app.services.ssrf._resolve_host", fake.resolve)
+    return fake
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _fresh_schema():
     # Each test runs on its own event loop; pooled asyncpg connections are bound
@@ -92,16 +128,19 @@ async def make_run(
     p50: float = 100.0,
     baseline: bool = False,
     age_minutes: int = 0,
+    status: RunStatus = RunStatus.done,
+    num_requests: int = 10,
+    created_at: datetime | None = None,
 ) -> uuid.UUID:
     run = Run(
         target_url="https://httpbin.org/get",
         method="GET",
-        num_requests=10,
+        num_requests=num_requests,
         concurrency=2,
-        status=RunStatus.done,
+        status=status,
         is_baseline=baseline,
         access_code_id=owner,
-        created_at=datetime.now(timezone.utc) - timedelta(minutes=age_minutes),
+        created_at=created_at or (datetime.now(timezone.utc) - timedelta(minutes=age_minutes)),
     )
     async with AsyncSessionLocal() as session:
         session.add(run)

@@ -1,4 +1,4 @@
-"""SLA threshold evaluation — purely algorithmic, no AI involved."""
+"""SLA threshold evaluation, purely algorithmic, no AI involved."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -39,7 +39,7 @@ def evaluate_sla(
     thresholds: list[SlaThresholdResult] = []
     for metric, target, actual in checks:
         if target is None:
-            continue  # threshold not configured — skip
+            continue  # threshold not configured, skip
 
         if actual is None:
             # Metric could not be measured (e.g. all requests errored before

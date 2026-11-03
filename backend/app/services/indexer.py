@@ -52,8 +52,11 @@ async def index_run(
     # access_code_id is the owner ("demo" or a code UUID). It is also a
     # filterable index field (see filterable_metadata_field_keys below) so
     # diagnose can restrict retrieval to own-or-demo runs inside the query.
+    # id_ is the run id so the stored doc_id field equals it; that is what lets
+    # delete_run_documents find (and remove) this run's document later.
     doc = Document(
         text=summary,
+        id_=str(run_id),
         metadata={"run_id": str(run_id), "access_code_id": access_code_id},
     )
 
@@ -81,7 +84,7 @@ async def index_run(
 
     try:
         # AzureAISearchVectorStore is the only vector store in this project
-        # (see CLAUDE.md — no alternatives). IndexManagement.VALIDATE_INDEX
+        # (see CLAUDE.md, no alternatives). IndexManagement.VALIDATE_INDEX
         # asserts the index exists rather than trying to create it at runtime,
         # which keeps IAM requirements minimal (no index-write permissions needed).
         vector_store = AzureAISearchVectorStore(
@@ -102,7 +105,7 @@ async def index_run(
         # from_documents embeds the document and upserts it into the vector store
         # in one call. We don't need a persistent StorageContext on disk because
         # Azure AI Search is the durable store.
-        # afrom_documents does not exist in llama-index-core 0.14.x — sync only.
+        # afrom_documents does not exist in llama-index-core 0.14.x, sync only.
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         VectorStoreIndex.from_documents(
             [doc],
@@ -114,3 +117,77 @@ async def index_run(
     finally:
         await async_index_client.close()
         sync_index_client.close()
+
+
+# ---------------------------------------------------------------------------
+# Deleting documents
+# ---------------------------------------------------------------------------
+
+def _search_client():
+    """Async client for the configured index. A function so tests can replace it."""
+    from azure.search.documents.aio import SearchClient
+
+    return SearchClient(
+        endpoint=settings.azure_search_endpoint,
+        index_name=settings.azure_search_index,  # the index name comes only from config
+        credential=AzureKeyCredential(settings.azure_search_key),
+    )
+
+
+async def _find_document_ids(client, run_id: uuid.UUID) -> list[str]:
+    """Index keys of every document that belongs to this run."""
+    run_text = str(run_id)  # a UUID prints as hex and hyphens: safe inside an OData string
+    found: list[str] = []
+
+    # Documents indexed by this version have doc_id == run id (exact, filterable).
+    results = await client.search(
+        search_text="*", filter=f"doc_id eq '{run_text}'", select=["id"], top=1000
+    )
+    async for item in results:
+        if item["id"] not in found:
+            found.append(item["id"])
+
+    # Documents indexed before that change have a random doc_id, but their text
+    # starts "Benchmark run <id> against ...". Find them by phrase and confirm the
+    # id really is in the text before deleting, so a fuzzy match never deletes
+    # another run's document.
+    results = await client.search(
+        search_text=f'"{run_text}"', search_fields=["content"], select=["id", "content"], top=50
+    )
+    async for item in results:
+        if run_text in (item.get("content") or "") and item["id"] not in found:
+            found.append(item["id"])
+    return found
+
+
+async def delete_run_documents(run_ids: list[uuid.UUID]) -> int:
+    """
+    Remove the search documents of the given runs, so deleting runs leaves no
+    orphans behind. Returns how many documents were deleted. Raises if Azure
+    reports a failure, so the caller can keep the database rows and retry.
+    Does nothing when Azure Search is not configured (local development).
+    """
+    if not run_ids:
+        return 0
+    if not settings.azure_search_endpoint or not settings.azure_search_key:
+        logger.info("Azure Search not configured; no index documents to delete")
+        return 0
+
+    client = _search_client()
+    deleted = 0
+    try:
+        for run_id in run_ids:
+            keys = await _find_document_ids(client, run_id)
+            if not keys:
+                continue
+            documents = []
+            for key in keys:
+                documents.append({"id": key})
+            outcomes = await client.delete_documents(documents=documents)
+            for outcome in outcomes:
+                if not outcome.succeeded:
+                    raise RuntimeError(f"Azure Search did not delete a document of run {run_id}")
+            deleted += len(keys)
+    finally:
+        await client.close()
+    return deleted

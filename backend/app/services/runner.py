@@ -3,17 +3,25 @@ import time
 
 import httpx
 
+from app.services.pinned import build_pinned_client
+
 
 async def run_benchmark(
     target_url: str,
     method: str,
     num_requests: int,
     concurrency: int,
+    pins: dict[str, list[str]],
+    timeout_s: float,
     headers: dict | None = None,
     body: dict | None = None,
 ) -> dict:
     """
     Fire num_requests against target_url with bounded concurrency.
+
+    `pins` maps the target hostname to the IP addresses that the SSRF check
+    validated; connections go only there (see app/services/pinned.py), so DNS is
+    never consulted again and a rebinding answer cannot change the destination.
 
     Returns:
         latencies:   per-request latency in milliseconds (one entry per request,
@@ -27,10 +35,12 @@ async def run_benchmark(
     # Lock guards appends to the shared lists from concurrent tasks.
     lock = asyncio.Lock()
 
-    # A single client is reused across all tasks — connection pooling is
+    # A single client is reused across all tasks, connection pooling is
     # handled internally by httpx and is much cheaper than creating a client
-    # per request.
-    async with httpx.AsyncClient(headers=headers or {}, timeout=30.0) as client:
+    # per request. The client never follows redirects and ignores proxy env vars.
+    async with build_pinned_client(
+        pins, headers=headers, timeout=timeout_s, max_connections=concurrency
+    ) as client:
 
         async def _single_request() -> None:
             nonlocal error_count
@@ -86,6 +96,8 @@ async def run_llm_benchmark(
     prompt: str,
     num_requests: int,
     concurrency: int,
+    pins: dict[str, list[str]],
+    timeout_s: float,
 ) -> dict:
     """
     Benchmark an OpenAI-compatible streaming LLM endpoint.
@@ -97,7 +109,7 @@ async def run_llm_benchmark(
         ttft_latencies:        ms from request send to first streamed chunk
         total_latencies:       ms from request send to last chunk
         tokens_per_second_list: chunks/sec per request (chunk count is a proxy
-                                for tokens — actual tokenisation isn't available
+                                for tokens, actual tokenisation isn't available
                                 without a tokeniser; chunk count is close enough
                                 for relative comparisons between runs)
         error_count:           requests that failed or returned non-2xx
@@ -120,9 +132,12 @@ async def run_llm_benchmark(
         "stream": True,
     }
 
-    # LLM endpoints can be slow — 120 s covers long generations without
-    # hanging forever on a stalled connection.
-    async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
+    # Same pinned, no-redirect client as the REST engine. The per-request
+    # timeout is capped by the caller (MAX_REQUEST_TIMEOUT_S); it applies to
+    # each connect/read, and the whole run is bounded by the wall-clock limit.
+    async with build_pinned_client(
+        pins, headers=headers, timeout=timeout_s, max_connections=concurrency
+    ) as client:
 
         async def _single_llm_request() -> None:
             nonlocal error_count

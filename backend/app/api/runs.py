@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from typing import Annotated
@@ -6,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AdminOnly, CurrentPrincipal, get_principal
+from app.api.deps import AdminOnly, CurrentPrincipal, get_principal, require_llm_benchmark_enabled
 from app.core.config import settings
 from app.core.db import get_db
 from app.models.run import Metrics, Run, RunStatus
@@ -23,8 +24,10 @@ from app.schemas.run import (
     SlaResult,
 )
 from app.services.aggregator import compute_metrics
-from app.services.indexer import index_run
+from app.services.indexer import delete_run_documents, index_run
+from app.services.quotas import QuotaExceeded, admission_lock, check_quotas
 from app.services.runner import run_benchmark, run_llm_benchmark
+from app.services.ssrf import TargetRejected, validate_target
 from app.services.scope import (
     effective_baseline,
     index_owner_value,
@@ -68,13 +71,25 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             run.status = RunStatus.running
             await session.commit()
 
-            result = await run_benchmark(
-                target_url=str(req.target_url),
-                method=req.method,
-                num_requests=req.num_requests,
-                concurrency=req.concurrency,
-                headers=req.headers,
-                body=req.body,
+            # Resolve again right before connecting: DNS may have changed since
+            # the request was accepted. The addresses validated here are the
+            # ones the connections are pinned to.
+            target = await validate_target(str(req.target_url))
+
+            # Hard wall-clock limit for the whole run: wait_for cancels the
+            # engine (and its client) if the run is still going when it expires.
+            result = await asyncio.wait_for(
+                run_benchmark(
+                    target_url=str(req.target_url),
+                    method=req.method,
+                    num_requests=req.num_requests,
+                    concurrency=req.concurrency,
+                    pins={target.host: target.addresses},
+                    timeout_s=_request_timeout(req),
+                    headers=req.headers,
+                    body=req.body,
+                ),
+                timeout=settings.run_wall_clock_limit_s,
             )
 
             latencies = result["latencies"]
@@ -92,7 +107,7 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
             )
             session.add(metrics)
 
-            # SLA evaluation — only when at least one threshold was provided.
+            # SLA evaluation, only when at least one threshold was provided.
             has_sla = any([
                 req.sla_p50_ms is not None,
                 req.sla_p95_ms is not None,
@@ -157,6 +172,22 @@ async def _execute_and_persist(run_id: uuid.UUID, req: BenchmarkRequest) -> None
                 logger.warning("Indexing failed for run %s: %s", run.id, exc)
             logger.info("Indexing block completed for run %s", run_id)
 
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Run %s exceeded the %gs wall-clock limit and was cancelled",
+                run_id,
+                settings.run_wall_clock_limit_s,
+            )
+            run.status = RunStatus.failed
+            await session.commit()
+
+        except TargetRejected as rejected:
+            # The target passed the check at request time but not now (for
+            # example DNS started returning an internal address). Nothing was sent.
+            logger.warning("Run %s refused before connecting: %s", run_id, rejected)
+            run.status = RunStatus.failed
+            await session.commit()
+
         except Exception as bg_exc:
             logger.exception("Background task failed for run %s: %s", run_id, bg_exc)
             run.status = RunStatus.failed
@@ -174,23 +205,41 @@ async def create_benchmark(
     db: DB,
     principal: CurrentPrincipal,
 ) -> RunCreatedResponse:
-    run = Run(
-        target_url=str(req.target_url),
-        method=req.method.upper(),
-        num_requests=req.num_requests,
-        concurrency=req.concurrency,
-        # Tag the run with the creating code so usage can be attributed.
-        access_code_id=principal.code_id,
-    )
-    db.add(run)
-    # Flush to get the DB-assigned id without committing the transaction;
-    # commit happens here so the row is visible to the background task's
-    # separate session before that task starts.
-    await db.commit()
-    await db.refresh(run)
+    # Reject unsafe targets before a row exists: 422 with a readable reason.
+    try:
+        await validate_target(str(req.target_url))
+    except TargetRejected as rejected:
+        raise HTTPException(status_code=422, detail=str(rejected))
+
+    # Check the limits and insert the run under one lock, so two simultaneous
+    # requests cannot both pass the same check.
+    async with admission_lock():
+        try:
+            await check_quotas(db, principal.code_id, req.num_requests)
+        except QuotaExceeded as exceeded:
+            raise HTTPException(
+                status_code=429,
+                detail=str(exceeded),
+                headers={"Retry-After": str(exceeded.retry_after_s)},
+            )
+
+        run = Run(
+            target_url=str(req.target_url),
+            method=req.method.upper(),
+            num_requests=req.num_requests,
+            concurrency=req.concurrency,
+            # Tag the run with the creating code so usage can be attributed.
+            access_code_id=principal.code_id,
+        )
+        db.add(run)
+        # Flush to get the DB-assigned id without committing the transaction;
+        # commit happens here so the row is visible to the background task's
+        # separate session before that task starts.
+        await db.commit()
+        await db.refresh(run)
 
     # BackgroundTasks runs after the response is sent but inside the same
-    # process — no broker needed for week-1 simplicity (see CLAUDE.md).
+    # process, no broker needed for week-1 simplicity (see CLAUDE.md).
     background_tasks.add_task(_execute_and_persist, run.id, req)
 
     return RunCreatedResponse(run_id=run.id)
@@ -227,12 +276,12 @@ async def list_runs(
 
     items = []
     for r in runs:
-        items.append(_run_to_response(r, baseline=baseline))
+        items.append(_run_to_response(r, baseline=baseline, caller_id=principal.code_id))
     return PaginatedRuns(total=total, offset=offset, limit=limit, items=items)
 
 
 # ---------------------------------------------------------------------------
-# GET /runs/baseline  — must be defined before /runs/{run_id} so that the
+# GET /runs/baseline , must be defined before /runs/{run_id} so that the
 # static path segment "baseline" is matched first.
 # ---------------------------------------------------------------------------
 
@@ -241,7 +290,26 @@ async def get_baseline_run(db: DB, principal: CurrentPrincipal) -> RunResponse:
     baseline = await effective_baseline(db, principal.code_id)
     if baseline is None:
         raise HTTPException(status_code=404, detail="No baseline run is set")
-    return _run_to_response(baseline, baseline=baseline)
+    return _run_to_response(baseline, baseline=baseline, caller_id=principal.code_id)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /runs/baseline , clear the caller's own baseline. Afterwards the
+# demo baseline (if any) applies again. Callers never touch the demo baseline.
+# ---------------------------------------------------------------------------
+
+@router.delete("/runs/baseline", status_code=200)
+async def clear_baseline(db: DB, principal: CurrentPrincipal) -> dict[str, str]:
+    result = await db.execute(
+        update(Run)
+        .where(and_(owned_clause(principal.code_id), Run.is_baseline == True))  # noqa: E712
+        .values(is_baseline=False)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="You have no baseline to clear")
+    await db.commit()
+    return {"message": "Baseline cleared"}
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +328,7 @@ async def set_baseline(
         raise HTTPException(status_code=400, detail="Run is already the baseline")
 
     await _replace_baseline(db, run, owned_clause(principal.code_id))
-    return _run_to_response(run, baseline=run)
+    return _run_to_response(run, baseline=run, caller_id=principal.code_id)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +339,7 @@ async def set_baseline(
 async def get_run(run_id: uuid.UUID, db: DB, principal: CurrentPrincipal) -> RunResponse:
     run = await _get_visible_run(db, run_id, principal)
     baseline = await effective_baseline(db, principal.code_id)
-    return _run_to_response(run, baseline=baseline)
+    return _run_to_response(run, baseline=baseline, caller_id=principal.code_id)
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +359,7 @@ async def get_run_metrics(
     if metrics is None:
         raise HTTPException(
             status_code=404,
-            detail="Metrics not found — run may still be in progress",
+            detail="Metrics not found, run may still be in progress",
         )
     return MetricsDetail.model_validate(metrics)
 
@@ -303,7 +371,7 @@ async def get_run_metrics(
 async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
     """
     Background task for LLM benchmarking. Results are logged rather than
-    persisted to the Metrics table — LLM metrics (TTFT, tokens/sec) have a
+    persisted to the Metrics table, LLM metrics (TTFT, tokens/sec) have a
     different shape from REST latencies and don't fit the existing schema.
     Persistence can be added in a follow-up once the schema is extended.
     """
@@ -311,13 +379,21 @@ async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
 
     logger.info("LLM benchmark task started for run_id=%s", run_id)
     try:
-        result = await run_llm_benchmark(
-            endpoint_url=str(req.endpoint_url),
-            api_key=req.api_key,
-            model=req.model,
-            prompt=req.prompt,
-            num_requests=req.num_requests,
-            concurrency=req.concurrency,
+        # Same guards as the REST benchmark: resolve again right before
+        # connecting, pin the connections, and bound the whole run.
+        target = await validate_target(str(req.endpoint_url))
+        result = await asyncio.wait_for(
+            run_llm_benchmark(
+                endpoint_url=str(req.endpoint_url),
+                api_key=req.api_key,
+                model=req.model,
+                prompt=req.prompt,
+                num_requests=req.num_requests,
+                concurrency=req.concurrency,
+                pins={target.host: target.addresses},
+                timeout_s=_request_timeout(req),
+            ),
+            timeout=settings.run_wall_clock_limit_s,
         )
 
         ttft = np.array(result["ttft_latencies"], dtype=float)
@@ -341,16 +417,32 @@ async def _execute_llm_benchmark(run_id: str, req: LLMBenchmarkRequest) -> None:
             avg_tps,
             result["error_count"],
         )
+    except TargetRejected as rejected:
+        logger.warning("LLM benchmark %s refused before connecting: %s", run_id, rejected)
+    except asyncio.TimeoutError:
+        logger.warning("LLM benchmark %s exceeded the wall-clock limit", run_id)
     except Exception as exc:
         logger.exception("LLM benchmark task failed for run_id=%s: %s", run_id, exc)
 
 
-@router.post("/llm", response_model=RunCreatedResponse, status_code=202)
+@router.post(
+    "/llm",
+    response_model=RunCreatedResponse,
+    status_code=202,
+    # Runs after the router-level session check: callers without a valid token
+    # still get 401; authenticated callers get 404 while the feature is off.
+    dependencies=[Depends(require_llm_benchmark_enabled)],
+)
 async def create_llm_benchmark(
     req: LLMBenchmarkRequest,
     background_tasks: BackgroundTasks,
 ) -> RunCreatedResponse:
-    # Generate a client-visible run_id without a DB row — LLM runs aren't
+    try:
+        await validate_target(str(req.endpoint_url))
+    except TargetRejected as rejected:
+        raise HTTPException(status_code=422, detail=str(rejected))
+
+    # Generate a client-visible run_id without a DB row, LLM runs aren't
     # persisted to the runs table yet. The id still lets callers correlate
     # log lines with the request that triggered them.
     import uuid as _uuid
@@ -379,14 +471,32 @@ async def reset_session(
     if include_demo is None:
         include_demo = not settings.auth_enabled
 
-    # Bulk ORM delete: issues a single DELETE FROM runs to the DB.
-    # The DB-level ondelete="CASCADE" on metrics.run_id handles removing
-    # all child metrics rows — ORM-level cascade doesn't fire for bulk deletes,
-    # so relying on the FK cascade here is intentional and correct.
-    stmt = delete(Run)
+    # Select first: the same ids drive both the index cleanup and the delete,
+    # so a run created meanwhile is neither orphaned nor removed unexpectedly.
+    id_query = select(Run.id)
     if not include_demo:
-        stmt = stmt.where(Run.access_code_id.is_not(None))
-    await db.execute(stmt)
+        id_query = id_query.where(Run.access_code_id.is_not(None))
+    run_ids: list[uuid.UUID] = []
+    for run_id in (await db.execute(id_query)).scalars():
+        run_ids.append(run_id)
+
+    # Index documents go first. If Azure fails, nothing is deleted and the admin
+    # can retry; the other order could leave documents with no run behind them.
+    try:
+        await delete_run_documents(run_ids)
+    except Exception as exc:
+        logger.error("Could not delete search documents (%s); no runs were deleted", type(exc).__name__)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not delete the runs' search documents; no runs were deleted. Try again.",
+        )
+
+    # Bulk ORM delete in batches of ids. The DB-level ondelete="CASCADE" on
+    # metrics.run_id removes child metrics rows (ORM-level cascade doesn't fire
+    # for bulk deletes, so relying on the FK cascade here is intentional).
+    batch_size = 500
+    for start in range(0, len(run_ids), batch_size):
+        await db.execute(delete(Run).where(Run.id.in_(run_ids[start : start + batch_size])))
     await db.commit()
     return {"message": "Session reset successfully"}
 
@@ -400,7 +510,7 @@ async def diagnose_run(
     req: DiagnoseRequest, db: DB, principal: CurrentPrincipal
 ) -> DiagnoseResponse:
     # Local import keeps rca.py's heavy LangChain/LlamaIndex imports from
-    # loading at startup — they're only needed when this endpoint is hit.
+    # loading at startup, they're only needed when this endpoint is hit.
     from app.services.rca import diagnose
 
     result = await diagnose(req.question, db=db, access_code_id=principal.code_id)
@@ -410,6 +520,13 @@ async def diagnose_run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _request_timeout(req) -> float:
+    """Per-request timeout: the caller's value (already capped) or the server maximum."""
+    if req.timeout_s is not None:
+        return req.timeout_s
+    return settings.max_request_timeout_s
+
 
 def _pct_delta(current: float, baseline: float) -> float:
     """Return percentage change of current vs baseline (positive = regression).
@@ -452,7 +569,9 @@ async def _replace_baseline(db: AsyncSession, run: Run, owner_scope) -> None:
     await db.refresh(run)
 
 
-def _run_to_response(run: Run, baseline: "Run | None" = None) -> RunResponse:
+def _run_to_response(
+    run: Run, baseline: "Run | None" = None, caller_id: uuid.UUID | None = None
+) -> RunResponse:
     """
     Map ORM Run → RunResponse.
 
@@ -509,6 +628,9 @@ def _run_to_response(run: Run, baseline: "Run | None" = None) -> RunResponse:
         concurrency=run.concurrency,
         status=run.status,
         is_baseline=is_baseline,
+        # Not owned by the caller. With auth off the caller is the demo owner,
+        # so nothing is read-only locally.
+        is_demo=run.access_code_id != caller_id,
         created_at=run.created_at,
         metrics=metrics_summary,
         delta_p50_pct=delta_p50_pct,
