@@ -122,6 +122,29 @@ default domain, so `API_URL`, `DEMO_URL` and the allowlist are already correct
 even though the apps do not exist yet. `CORS_ORIGINS` is the exact Static Web App
 origin, set automatically.
 
+### 4a. Regions and pre-deployment checks
+
+Some subscriptions (Azure for Students in particular) are limited by an
+allowed-regions policy, and Postgres can be blocked per region even where other
+services work. In the reference deployment everything runs in `westus2`
+(`location`, `staticWebAppLocation`) except Postgres, which runs in `westus`
+(`postgresLocation=westus`) because Postgres was restricted in `westus2`.
+Cross-region traffic between the apps and the database adds a few milliseconds and
+a small egress charge.
+
+Before every deployment:
+
+1. Check every role GUID in `infra/main.bicep` resolves to the intended role:
+   `az role definition list --name <guid> --query "[0].roleName" -o tsv`.
+2. Check regional restrictions per resource type, not just SKU lists. For Postgres
+   read `az rest --method get --url "https://management.azure.com/subscriptions/<sub>/providers/Microsoft.DBforPostgreSQL/locations/<region>/capabilities?api-version=2024-08-01"`
+   and look for a `reason` such as "Subscriptions are restricted". For the others
+   use `az provider show -n <namespace> --query "resourceTypes[?resourceType=='<type>'].locations"`
+   and the allowed-regions policy (`az policy assignment list`).
+3. Run `az bicep build`, then `az deployment group what-if`. Expect harmless
+   "Modify" entries on existing resources: what-if lists service-assigned defaults
+   as deleted and cannot resolve `reference()` expressions.
+
 ## 5. Put secrets in Key Vault (never print them)
 
 Writing secrets needs the **Key Vault Secrets Officer** role:
