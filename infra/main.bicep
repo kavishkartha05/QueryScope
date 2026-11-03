@@ -64,8 +64,10 @@ param trustedProxyHops int = 1
 
 @description('Email for budget and alert notifications.')
 param alertEmail string
+@description('Create the Consumption budget. Set false if the subscription type rejects it (for example Azure for Students) and create one in the portal instead.')
+param createBudget bool = true
 @description('Monthly budget in your billing currency.')
-param monthlyBudget int = 25
+param monthlyBudget int = 40
 param budgetStartDate string = '${utcNow('yyyy-MM')}-01'
 
 param tags object = { app: 'queryscope', env: 'demo' }
@@ -446,7 +448,7 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   }
 }
 
-resource budget 'Microsoft.Consumption/budgets@2023-05-01' = {
+resource budget 'Microsoft.Consumption/budgets@2023-05-01' = if (createBudget) {
   name: '${namePrefix}-monthly'
   properties: {
     category: 'Cost'

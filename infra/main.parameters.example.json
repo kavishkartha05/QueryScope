@@ -14,6 +14,7 @@
     "extraAllowedHosts": { "value": "httpbin.org" },
     "trustedProxyHops": { "value": 1 },
     "alertEmail": { "value": "you@example.com" },
-    "monthlyBudget": { "value": 25 }
+    "monthlyBudget": { "value": 40 },
+    "createBudget": { "value": true }
   }
 }
