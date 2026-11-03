@@ -277,9 +277,20 @@ npm ci --ignore-scripts
 VITE_API_URL="$API_URL" npm run build:swa
 TOKEN=$(az staticwebapp secrets list -g "$RG" -n "$(jq -r .staticWebAppName.value ../qs-outputs.json)" \
   --query properties.apiKey -o tsv)
-npx @azure/static-web-apps-cli deploy ./dist --deployment-token "$TOKEN" --env production   # (changes Azure)
+# Pin the CLI version. Prefer the SWA_CLI_DEPLOYMENT_TOKEN environment variable over
+# --deployment-token so the token does not appear in the process list.
+SWA_CLI_DEPLOYMENT_TOKEN="$TOKEN" npx --yes @azure/static-web-apps-cli@2.1.0 deploy ./dist \
+  --swa-config-location ./dist --env production   # (changes Azure)
 unset TOKEN
 ```
+
+Always pass `--swa-config-location ./dist`. Without it the CLI can report
+"Found configuration file: frontend/staticwebapp.config.json" and pick up the raw
+file whose CSP still contains the `__API_ORIGIN__` placeholder, instead of the
+rendered one in `dist/`. In the reference deployment the live CSP turned out
+correct anyway, but the flag removes the doubt. After every deploy, check the live
+headers: `curl -sI <site> | grep -i content-security-policy` must show your API
+origin and no `__API_ORIGIN__`.
 
 `build:swa` writes `dist/staticwebapp.config.json` with the CSP `connect-src` set
 to your backend origin only. Headers: CSP, `X-Content-Type-Options: nosniff`,
