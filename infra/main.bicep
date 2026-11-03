@@ -30,6 +30,8 @@ param deployApps bool = false
 param backendImage string = ''
 param demoTargetImage string = ''
 
+@description('Region for Postgres. Some subscriptions (for example Azure for Students) are blocked from Postgres in certain regions even when other services work there.')
+param postgresLocation string = location
 param postgresAdminUser string = 'qsadmin'
 @secure()
 param postgresAdminPassword string
@@ -89,7 +91,7 @@ var migrateJobName = '${namePrefix}-migrate'
 var swaName = '${namePrefix}-web'
 
 var acrPullRole = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-var kvSecretsUserRole = '4633458b-17de-4789-8e26-0ba5ffc0a3a0'
+var kvSecretsUserRole = '4633458b-17de-408a-b874-0445c86b69e6'
 
 // Container Apps hostnames are predictable from the environment's default
 // domain, so they are known in phase 1, before any app exists. That lets the
@@ -168,7 +170,7 @@ resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: postgresName
-  location: location
+  location: postgresLocation
   tags: tags
   sku: {
     name: postgresSkuName
