@@ -131,7 +131,8 @@ A live, invite-only demo runs on Azure for recruiters and reviewers.
     shared, read-only example runs.
   - RAG diagnosis: ask questions in plain language about latency and degradation,
     answered from your indexed runs through Azure AI Search.
-- **Screenshot:** TODO. Add a screenshot or GIF of the dashboard here.
+
+![QueryScope hosted demo: a New Benchmark form limited to allowlisted targets with request, concurrency and timeout caps, above a table of benchmark runs showing p50, p95 and p99 latency with percent change against the user's baseline](docs/screenshot.png)
 - **What it is safe for:** benchmarks can only target a small allowlist (a demo
   service plus httpbin.org), and runs are capped at 500 requests, concurrency 20,
   10 s per request and 60 s per run. Your runs are private to your code; the seeded
