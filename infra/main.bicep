@@ -64,6 +64,8 @@ param trustedProxyHops int = 1
 
 @description('Email for budget and alert notifications.')
 param alertEmail string
+@description('Purge protection blocks purging a deleted vault for the soft-delete period, which makes teardown and redeploy of a demo awkward. It cannot be turned off once on.')
+param kvPurgeProtection bool = true
 @description('Create the Consumption budget. Set false if the subscription type rejects it (for example Azure for Students) and create one in the portal instead.')
 param createBudget bool = true
 @description('Monthly budget in your billing currency.')
@@ -148,7 +150,8 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: true
+    // Omitted (null) when off: Key Vault rejects an explicit false on some API paths and it cannot be undone once true
+    enablePurgeProtection: kvPurgeProtection ? true : null
     publicNetworkAccess: 'Enabled'
   }
 }

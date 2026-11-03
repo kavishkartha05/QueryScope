@@ -377,8 +377,9 @@ Keep the code out of shell history: `read -rs CODE`.
 - **Emergency stop**: revoke codes (tokens die immediately), or
   `az containerapp ingress disable -g "$RG" -n "$BACKEND_APP"` (re-enable with
   `ingress enable --type external --target-port 8000`).
-- **Total removal**: `az group delete -n "$RG"`. Key Vault has purge protection,
-  so its name stays reserved for 7 days.
+- **Total removal**: `az group delete -n "$RG"`. With the default
+  `kvPurgeProtection=true` the vault name stays reserved for 7 days after deletion;
+  deploy with `kvPurgeProtection=false` to allow `az keyvault purge` instead.
 
 ## 14. Backend environment variables
 
