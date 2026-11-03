@@ -207,11 +207,17 @@ resource pgAllowAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2
   }
 }
 
-resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
+resource containerEnv 'Microsoft.App/managedEnvironments@2026-07-01' = {
   name: envName
   location: location
   tags: tags
   properties: {
+    // Explicit on purpose: without it Azure created an Express environment for this
+    // subscription, and Express rejects Jobs and Key Vault secret references.
+    environmentMode: 'WorkloadProfiles'
+    workloadProfiles: [
+      { name: 'Consumption', workloadProfileType: 'Consumption' }
+    ]
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
