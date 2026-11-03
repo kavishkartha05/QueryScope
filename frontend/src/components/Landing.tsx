@@ -53,27 +53,6 @@ export default function Landing({ notice, onLogin }: LandingProps) {
           </p>
         </header>
 
-        {/* Replace with a screenshot or GIF of the dashboard. */}
-        <div
-          role="img"
-          aria-label="Screenshot of the QueryScope dashboard (coming soon)"
-          style={{
-            border: "1px dashed #2e3150",
-            borderRadius: 12,
-            minHeight: 180,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#8892b0",
-            fontSize: 13,
-            background: "#0f0f1a",
-            textAlign: "center",
-            padding: 16,
-          }}
-        >
-          Screenshot or GIF placeholder
-        </div>
-
         <section
           aria-labelledby="enter-code"
           style={{ background: "#0f0f1a", border: "1px solid #1a1a2e", borderRadius: 12, padding: "20px 18px" }}
