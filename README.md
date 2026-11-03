@@ -120,10 +120,18 @@ Connect it to Claude Desktop and you can say "benchmark httpbin with 50 requests
 
 A live, invite-only demo runs on Azure for recruiters and reviewers.
 
-- **Live URL:** _coming soon (placeholder: add the Static Web App URL here)_
+- **Live URL:** https://green-beach-08d11881e.6.azurestaticapps.net
 - **Access:** invite-only. Each visitor gets a personal access code (or a one-click
-  link). To request one, email the address shown on the demo's landing page, or open
-  an issue on this repository.
+  link). To request one, email kavish01+queryscope@gmail.com or open an issue on
+  this repository.
+- **What the demo shows:**
+  - Load testing against an allowlisted target (a demo service plus httpbin.org),
+    with p50/p95/p99 latency, throughput and error rates charted per run.
+  - Per-code isolated runs: what you run is private to your access code, next to
+    shared, read-only example runs.
+  - RAG diagnosis: ask questions in plain language about latency and degradation,
+    answered from your indexed runs through Azure AI Search.
+- **Screenshot:** TODO. Add a screenshot or GIF of the dashboard here.
 - **What it is safe for:** benchmarks can only target a small allowlist (a demo
   service plus httpbin.org), and runs are capped at 500 requests, concurrency 20,
   10 s per request and 60 s per run. Your runs are private to your code; the seeded
