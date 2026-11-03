@@ -144,6 +144,16 @@ Before every deployment:
 3. Run `az bicep build`, then `az deployment group what-if`. Expect harmless
    "Modify" entries on existing resources: what-if lists service-assigned defaults
    as deleted and cannot resolve `reference()` expressions.
+4. After any change to the Container Apps environment (and after the first
+   deployment), read the environment mode and confirm the features the apps need are
+   supported, because what-if cannot detect service-side limits:
+   `az containerapp env show -g <rg> -n <env> --query properties.environmentMode -o tsv`
+   must print `WorkloadProfiles`. An `Express` environment rejects Jobs and
+   Key Vault secret references. The template sets `environmentMode` explicitly; the
+   mode cannot be changed in place, so a wrong environment has to be deleted and
+   recreated, which also changes its default domain and therefore the backend and
+   demo-target hostnames, `ALLOWED_TARGET_HOSTS`, `DEMO_TARGET_URL` and
+   `CORS_ORIGINS`.
 
 ## 5. Put secrets in Key Vault (never print them)
 
